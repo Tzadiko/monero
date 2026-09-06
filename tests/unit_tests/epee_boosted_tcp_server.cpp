@@ -45,6 +45,15 @@
 #include "net/levin_protocol_handler_async.h"
 #include "p2p/net_node.h"
 
+// Used directly by the SSL fingerprint test below rather than relied upon
+// transitively through "net/abstract_tcp_server2.h": <algorithm> for the ordering
+// assertions, the two OpenSSL headers for SSL_CTX_get0_certificate() and
+// X509_digest(), and "net/net_ssl.h" for epee::net_utils::ssl_options_t.
+#include <algorithm>
+#include <openssl/ssl.h>
+#include <openssl/x509.h>
+#include "net/net_ssl.h"
+
 namespace
 {
   const uint32_t test_server_port = 5626;
@@ -603,6 +612,174 @@ TEST(test_epee_connection, ssl_handshake)
   work.reset();
   for (;workers.size(); workers.pop_back())
     workers.back().join();
+}
+
+/*!
+  Proves that a certificate fingerprint supplied in an unsorted list is found by
+  `epee::net_utils::ssl_options_t`, and that an absent one is rejected.
+
+  The fingerprint list is a private member sorted by the `ssl_options_t`
+  constructor and searched with a binary search by `ssl_options_t::has_fingerprint`.
+  The two operations must agree on one ordering: if they disagree, the search
+  silently stops finding valid certificates - a peer that should be trusted is
+  dropped, or worse, the failure hides until a particular list order occurs. The
+  ordering is not reachable from a test directly (the list is private and the
+  comparator has internal linkage), so it is exercised the only way a caller can:
+  by handing an out-of-order list to the public constructor and running a real
+  handshake against a peer whose certificate is, and then is not, in that list.
+ */
+TEST(test_epee_connection, ssl_handshake_fingerprint_lookup)
+{
+  using io_context_t = boost::asio::io_context;
+  using socket_t = boost::asio::ip::tcp::socket;
+  using acceptor_t = boost::asio::ip::tcp::acceptor;
+  using endpoint_t = boost::asio::ip::tcp::endpoint;
+  using ssl_socket_t = boost::asio::ssl::stream<socket_t>;
+  using ssl_options_t = epee::net_utils::ssl_options_t;
+  using fingerprint_t = std::vector<std::uint8_t>;
+  using ec_t = boost::system::error_code;
+
+  // SSL must be enabled explicitly: `create_context()` returns a bare context
+  // without any certificate when the configuration is disabled, and the
+  // `ssl_options_t{{}}` spelling used by the ssl_handshake test above is a
+  // disabled configuration. With no private key path configured the context gets
+  // a self-signed RSA certificate generated in memory, which is exactly the peer
+  // certificate a fingerprint whitelist is meant to pin.
+  ssl_options_t server_options{epee::net_utils::ssl_support_t::e_ssl_support_enabled};
+  auto server_context = server_options.create_context();
+
+  // "get0" hands back a pointer the context still owns - it must not be freed here.
+  X509* const server_certificate = SSL_CTX_get0_certificate(server_context.native_handle());
+  ASSERT_NE(server_certificate, nullptr);
+
+  // Computed exactly as ssl_options_t::has_fingerprint() computes the value it
+  // searches for - SHA-256 into an EVP_MAX_MD_SIZE buffer, then shrunk to the
+  // digest length - so that this is the very fingerprint the lookup will look for.
+  // The human-readable helpers in net_ssl.h are deliberately not used: they return
+  // a colon-separated string, not these raw bytes.
+  fingerprint_t expected(EVP_MAX_MD_SIZE);
+  unsigned int digest_size = 0;
+  ASSERT_EQ(X509_digest(server_certificate, EVP_sha256(), expected.data(), &digest_size), 1);
+  expected.resize(digest_size);
+  ASSERT_EQ(expected.size(), static_cast<std::size_t>(SSL_FINGERPRINT_SIZE));
+
+  // The same strict weak ordering the fingerprint comparator in net_ssl.cpp
+  // defines, so that the expectations below are stated in terms of the order
+  // actually under test instead of std::vector's relational operators.
+  const auto fingerprint_less = [](const fingerprint_t& lhs, const fingerprint_t& rhs) {
+    return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+  };
+
+  // Two decoy fingerprints derived from `expected` deterministically, one on each
+  // side of it. Moving the first byte that is not already at its bound decides the
+  // order on its own - every earlier byte is identical to `expected` - so the decoy
+  // is strictly greater or strictly smaller, stays exactly SSL_FINGERPRINT_SIZE
+  // bytes long, and can never be a duplicate of `expected` itself.
+  const auto derive_decoy = [&expected](const bool greater_than_expected) {
+    fingerprint_t decoy(expected);
+    const std::uint8_t bound = greater_than_expected ? 0xff : 0x00;
+    for (std::size_t i = 0; i < decoy.size(); ++i)
+    {
+      if (decoy[i] == bound)
+        continue;
+      decoy[i] = static_cast<std::uint8_t>(greater_than_expected ? decoy[i] + 1 : decoy[i] - 1);
+      break;
+    }
+    return decoy;
+  };
+
+  const fingerprint_t greater = derive_decoy(true);
+  const fingerprint_t smaller = derive_decoy(false);
+
+  // A digest of nothing but 0xff (or 0x00) bytes would defeat that derivation. It
+  // cannot occur for a real certificate, and these assertions prove it did not.
+  ASSERT_TRUE(fingerprint_less(expected, greater));
+  ASSERT_TRUE(fingerprint_less(smaller, expected));
+
+  // The flow both paths share, so that they cannot drift apart. Returns the
+  // client's verdict, which is what the fingerprint lookup decides.
+  const auto client_handshake_succeeds =
+    [&server_options, &server_context](const std::vector<fingerprint_t>& fingerprints)
+  {
+    // Generous: a loopback handshake completes in milliseconds and this deadline is
+    // only reached if a peer stops answering. Zero would fire immediately, which is
+    // how the ssl_handshake test above forces a failure.
+    const std::chrono::milliseconds timeout(30 * 1000);
+
+    // Held in a named local that outlives the handshake below: configure() installs
+    // a verification callback that captures these options by reference and is
+    // invoked from within the handshake. The empty ca_path is required - it leaves
+    // the user-certificate check with no certificate authority to fall back on, so
+    // verification always reaches the fingerprint lookup.
+    ssl_options_t client_options{fingerprints, ""};
+    auto client_context = client_options.create_context();
+
+    // One io_context per side. handshake() drives the context it is given itself
+    // (restarting it and polling it in its own loop), so no worker thread and no
+    // work guard is needed here; two independent contexts keep the two
+    // self-pumping loops from stealing each other's handlers.
+    io_context_t server_io;
+    io_context_t client_io;
+    ec_t ec;
+
+    // Port 0 lets the OS assign a free loopback port, so this test never collides
+    // with another test - or another copy of itself - over a fixed port number.
+    acceptor_t acceptor(server_io);
+    const endpoint_t bind_endpoint(boost::asio::ip::address_v4::loopback(), 0);
+    acceptor.open(bind_endpoint.protocol(), ec);
+    EXPECT_EQ(ec.value(), 0);
+    acceptor.bind(bind_endpoint, ec);
+    EXPECT_EQ(ec.value(), 0);
+    acceptor.listen(boost::asio::socket_base::max_listen_connections, ec);
+    EXPECT_EQ(ec.value(), 0);
+    const endpoint_t server_endpoint = acceptor.local_endpoint(ec);
+    EXPECT_EQ(ec.value(), 0);
+
+    // Connect first and accept second: the blocking connect() completes through the
+    // listen backlog, so this ordering cannot deadlock on a single thread.
+    ssl_socket_t client_ssl(client_io, client_context);
+    client_ssl.next_layer().connect(server_endpoint, ec);
+    EXPECT_EQ(ec.value(), 0);
+    ssl_socket_t server_ssl(server_io, server_context);
+    acceptor.accept(server_ssl.next_layer(), ec);
+    EXPECT_EQ(ec.value(), 0);
+
+    std::thread server_thread([&] {
+      // The server's verdict is deliberately not asserted: once the client rejects
+      // the certificate, the server legitimately fails with a TLS alert.
+      server_options.handshake(server_io, server_ssl, ssl_socket_t::server, {}, {}, timeout);
+    });
+    const bool verified = client_options.handshake(
+      client_io, client_ssl, ssl_socket_t::client, {}, {}, timeout
+    );
+    // Unconditional, so a failed expectation can neither hang the test nor leak the
+    // thread.
+    server_thread.join();
+
+    // handshake() already closes the socket on failure, so repeating it here is
+    // harmless; the error code is ignored, as it is elsewhere in this file.
+    client_ssl.next_layer().shutdown(socket_t::shutdown_both, ec);
+    client_ssl.next_layer().close(ec);
+    server_ssl.next_layer().shutdown(socket_t::shutdown_both, ec);
+    server_ssl.next_layer().close(ec);
+    acceptor.close(ec);
+    return verified;
+  };
+
+  // Deliberately out of order around `expected`, so the constructor's sort has real
+  // work to do and the subsequent binary search can only find the entry if both use
+  // the same ordering.
+  const std::vector<fingerprint_t> matching{greater, expected, smaller};
+  ASSERT_FALSE(std::is_sorted(matching.begin(), matching.end(), fingerprint_less));
+  EXPECT_TRUE(client_handshake_succeeds(matching));
+
+  // The same flow with the server's fingerprint removed. The list stays non-empty
+  // and out of order, so the lookup still runs its search - rather than returning
+  // early on an empty list - and the handshake must fail, because SSL support is
+  // enabled rather than autodetected. An error is logged on this path by design.
+  const std::vector<fingerprint_t> mismatching{greater, smaller};
+  ASSERT_FALSE(std::is_sorted(mismatching.begin(), mismatching.end(), fingerprint_less));
+  EXPECT_FALSE(client_handshake_succeeds(mismatching));
 }
 
 namespace
