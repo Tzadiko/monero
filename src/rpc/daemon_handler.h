@@ -47,6 +47,66 @@ namespace cryptonote
 namespace rpc
 {
 
+/*! \return The network name the daemon RPC surface reports for \a type.
+
+  The four names are the ones the HTTP `get_info` handler emits
+  (`core_rpc_server::on_get_info`), and the two surfaces have to agree because
+  they describe one and the same daemon. `DaemonInfo::mainnet`, `::testnet` and
+  `::stagenet` cannot name a locally generated chain, which is why the contract
+  also carries `nettype` and why anything that is not one of the three named
+  networks reports as "fakechain". */
+const char* get_nettype_name(network_type type) noexcept;
+
+/*! Append \a src to \a dest as the `peer` values of a get_peer_list response.
+
+  Called once per list so that the white and the gray list can never drift apart
+  in the filtering they apply, and appends rather than assigns so that the
+  destination may already hold entries. Two entry classes are dropped, matching
+  the defaults of the established HTTP `get_peer_list` handler
+  (`core_rpc_server::on_get_peer_list`):
+
+  - every entry for which \a is_blocked reports the address as banned, because
+    that handler defaults `include_blocked` to false and a banned host is not a
+    peer a client should be handed as reachable;
+  - every address that is not IPv4, because `cryptonote::rpc::peer` carries the
+    address as a 32-bit `ip` and so has no representation for anything else. The
+    ZMQ response contract is frozen at DAEMON_RPC_VERSION_ZMQ 2.0, so widening
+    that field is not an option.
+
+  All seven members of `peer` are assigned. `last_seen` is a signed UNIX
+  timestamp on the p2p side and an unsigned one in the response, hence the
+  explicit cast.
+
+  \param is_blocked Called with each entry's `network_address`; returns whether
+    the host is currently banned. Taken as a parameter rather than read from the
+    p2p server so that the conversion can be exercised on its own. */
+template<typename IsBlocked>
+void append_peerlist(const IsBlocked& is_blocked, const std::vector<nodetool::peerlist_entry>& src, std::vector<peer>& dest)
+{
+  dest.reserve(dest.size() + src.size());
+  for (const nodetool::peerlist_entry& entry : src)
+  {
+    if (is_blocked(entry.adr))
+      continue;
+
+    if (entry.adr.get_type_id() != epee::net_utils::ipv4_network_address::get_type_id())
+      continue;
+
+    const epee::net_utils::ipv4_network_address& address = entry.adr.as<epee::net_utils::ipv4_network_address>();
+
+    peer out{};
+    out.id = entry.id;
+    out.ip = address.ip();
+    out.port = address.port();
+    out.rpc_port = entry.rpc_port;
+    out.rpc_credits_per_hash = entry.rpc_credits_per_hash;
+    out.last_seen = static_cast<uint64_t>(entry.last_seen);
+    out.pruning_seed = entry.pruning_seed;
+
+    dest.push_back(out);
+  }
+}
+
 class DaemonHandler : public RpcHandler
 {
   public:

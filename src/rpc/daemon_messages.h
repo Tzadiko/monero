@@ -170,6 +170,15 @@ BEGIN_RPC_MESSAGE_CLASS(SendRawTx);
     RPC_MESSAGE_MEMBER(bool, relay);
   END_RPC_MESSAGE_REQUEST;
   BEGIN_RPC_MESSAGE_RESPONSE;
+    /* True when the transaction was accepted and handed to the protocol relay
+       path, i.e. queued for relay. It is never a confirmation that a peer
+       received the transaction - peers do not acknowledge relayed transactions,
+       so no such confirmation is available to the daemon. False means the
+       transaction was not handed over: either the request failed (see `status`
+       and `error_details`), or the transaction was accepted into the pool with
+       relaying suppressed, which a successful response reports as `error_details`
+       "Not relayed". This member is also what send_raw_tx_hex returns, through
+       the response alias below. */
     RPC_MESSAGE_MEMBER(bool, relayed);
   END_RPC_MESSAGE_RESPONSE;
 END_RPC_MESSAGE_CLASS;

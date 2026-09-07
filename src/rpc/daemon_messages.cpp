@@ -34,6 +34,34 @@ namespace cryptonote
 
 namespace rpc
 {
+
+namespace
+{
+  /*! Read `key` from `val` into `dest` only when the member is present.
+
+    `GET_FROM_JSON_OBJECT` expands `OBJECT_HAS_MEMBER_OR_THROW` and therefore
+    throws `cryptonote::json::MISSING_KEY` when a member is absent, which is the
+    right contract for a field that every daemon has always written. A field that
+    only newer daemons write needs the opposite treatment: `DAEMON_RPC_VERSION_ZMQ`
+    is frozen, so peers built from different revisions must interoperate, and a
+    required read would make a newer client reject the otherwise valid response of
+    an older daemon that never emitted the key. Reading such a field through this
+    helper leaves the `RPC_MESSAGE_MEMBER` value-initialised default in place (0
+    for integers, an all-zero `crypto::hash`) when the key is absent, while a
+    present-but-malformed value still raises the usual `WRONG_TYPE`/`BAD_INPUT`
+    error from `fromJsonValue`. Writing the field is unconditional: readers of the
+    frozen contract ignore members they do not know. */
+  template<typename T>
+  void read_optional_json_member(const rapidjson::Value& val, const char* const key, T& dest)
+  {
+    const auto member = val.FindMember(key);
+    if (member == val.MemberEnd())
+      return;
+
+    json::fromJsonValue(member->value, dest);
+  }
+} // anonymous
+
 void GetHeight::Request::doToJson(rapidjson::Writer<epee::byte_stream>& dest) const
 {}
 
@@ -81,7 +109,9 @@ void GetBlocksFast::Response::doToJson(rapidjson::Writer<epee::byte_stream>& des
   INSERT_INTO_JSON_OBJECT(dest, blocks, blocks);
   INSERT_INTO_JSON_OBJECT(dest, start_height, start_height);
   INSERT_INTO_JSON_OBJECT(dest, current_height, current_height);
+  INSERT_INTO_JSON_OBJECT(dest, top_block_hash, top_block_hash);
   INSERT_INTO_JSON_OBJECT(dest, output_indices, output_indices);
+  INSERT_INTO_JSON_OBJECT(dest, max_block_count, max_block_count);
 }
 
 void GetBlocksFast::Response::fromJson(const rapidjson::Value& val)
@@ -95,6 +125,16 @@ void GetBlocksFast::Response::fromJson(const rapidjson::Value& val)
   GET_FROM_JSON_OBJECT(val, start_height, start_height);
   GET_FROM_JSON_OBJECT(val, current_height, current_height);
   GET_FROM_JSON_OBJECT(val, output_indices, output_indices);
+
+  // Both members are declared by the response contract but were never written by
+  // earlier daemons, so they are read optionally - see read_optional_json_member.
+  // Each is reset first, so that a payload without the key leaves the member at
+  // the contract's default rather than at whatever a reused response held, which
+  // is how the required reads above already behave.
+  top_block_hash = {};
+  max_block_count = 0;
+  read_optional_json_member(val, "top_block_hash", top_block_hash);
+  read_optional_json_member(val, "max_block_count", max_block_count);
 }
 
 

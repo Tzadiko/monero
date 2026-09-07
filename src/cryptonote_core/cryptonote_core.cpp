@@ -426,6 +426,15 @@ namespace cryptonote
     return m_blockchain_storage.get_transactions(txs_ids, txs, missed_txs, pruned);
   }
   //-----------------------------------------------------------------------------------------------
+  core::tx_lookup_status core::lookup_transactions(const std::vector<crypto::hash>& txs_ids, std::vector<transaction>& txs, std::vector<crypto::hash>& missed_txs) const
+  {
+    // the storage layer logs why it failed; here the outcome only has to be named
+    if (!m_blockchain_storage.get_transactions(txs_ids, txs, missed_txs))
+      return tx_lookup_status::backend_failure;
+
+    return tx_lookup_status::success;
+  }
+  //-----------------------------------------------------------------------------------------------
   bool core::get_alternative_blocks(std::vector<block>& blocks) const
   {
     return m_blockchain_storage.get_alternative_blocks(blocks);

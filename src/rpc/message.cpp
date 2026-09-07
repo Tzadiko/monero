@@ -28,6 +28,8 @@
 
 #include "message.h"
 
+#include <cstring>
+
 #include "daemon_rpc_version.h"
 #include "serialization/json_object.h"
 
@@ -48,10 +50,45 @@ namespace
 {
 constexpr const char error_field[] = "error";
 constexpr const char id_field[] = "id";
+constexpr const char jsonrpc_field[] = "jsonrpc";
 constexpr const char method_field[] = "method";
 constexpr const char params_field[] = "params";
 constexpr const char result_field[] = "result";
 
+//! Length of the one JSON-RPC protocol version this daemon speaks.
+constexpr std::size_t jsonrpc_version_length = sizeof(FullMessage::JSONRPC_VERSION) - 1;
+
+/*! Public error text for a failure whose cause must not be disclosed. The
+  exception that caused it is logged by the caller instead of being copied into
+  the response (CWE-209). */
+constexpr const char internal_error_details[] = "Internal error while handling the request";
+
+/*! \return True if `value` may appear in a JSON-RPC method name.
+
+  Method names are identifiers, so the accepted set is ASCII alphanumerics plus
+  `_`, `.` and `-`. Everything else is rejected, which excludes NUL - the byte
+  that would otherwise truncate a name and let a non-canonical request dispatch
+  as a shorter registered method - along with every other control character,
+  whitespace, quoting and escaping byte, and all non-ASCII input. Bytes are
+  examined as `unsigned char` so the classification does not depend on whether
+  `char` is signed, and it is done here rather than with `<cctype>` so that it
+  is immune to the process locale. */
+bool is_canonical_method_char(const char value) noexcept
+{
+  const unsigned char byte = static_cast<unsigned char>(value);
+  return (byte >= 'a' && byte <= 'z') ||
+         (byte >= 'A' && byte <= 'Z') ||
+         (byte >= '0' && byte <= '9') ||
+         byte == '_' || byte == '.' || byte == '-';
+}
+
+/*! \return The validated `method` member of `src`.
+
+  \throw cryptonote::json::MISSING_KEY if `method` is absent.
+  \throw cryptonote::json::WRONG_TYPE if `method` is not a string, is empty, is
+    longer than `FullMessage::MAX_METHOD_LENGTH`, or contains a byte that is not
+    canonical. The length is taken from the DOM instead of from a C string, so
+    an embedded NUL is seen and rejected rather than silently ending the name. */
 const rapidjson::Value& get_method_field(const rapidjson::Value& src)
 {
   const auto member = src.FindMember(method_field);
@@ -59,7 +96,46 @@ const rapidjson::Value& get_method_field(const rapidjson::Value& src)
     throw cryptonote::json::MISSING_KEY{method_field};
   if (!member->value.IsString())
     throw cryptonote::json::WRONG_TYPE{"Expected string"};
+
+  const char* const method = member->value.GetString();
+  const std::size_t length = member->value.GetStringLength();
+  static_assert(FullMessage::MAX_METHOD_LENGTH == 64, "the error text below names this bound");
+  if (length == 0 || length > FullMessage::MAX_METHOD_LENGTH)
+    throw cryptonote::json::WRONG_TYPE{"non-empty method name of at most 64 characters"};
+
+  for (std::size_t i = 0; i < length; ++i)
+  {
+    if (!is_canonical_method_char(method[i]))
+      throw cryptonote::json::WRONG_TYPE{"method name of characters [A-Za-z0-9_.-] only"};
+  }
+
   return member->value;
+}
+
+/*! Verify the JSON-RPC protocol version of `src`.
+
+  Presence alone is not enough: an envelope that names an unsupported version,
+  or that carries a non-string there, is not a request this daemon can honour
+  and must be rejected before dispatch rather than interpreted as 2.0 (CWE-20).
+
+  \throw cryptonote::json::MISSING_KEY if `jsonrpc` is absent.
+  \throw cryptonote::json::WRONG_TYPE if `jsonrpc` is not the string "2.0". The
+    comparison is length-checked, so a value that merely starts with `2.0` -
+    including one whose remainder is hidden behind an embedded NUL - is
+    rejected. */
+void validate_jsonrpc_field(const rapidjson::Value& src)
+{
+  const auto member = src.FindMember(jsonrpc_field);
+  if (member == src.MemberEnd())
+    throw cryptonote::json::MISSING_KEY{jsonrpc_field};
+  if (!member->value.IsString())
+    throw cryptonote::json::WRONG_TYPE{"string"};
+
+  if (member->value.GetStringLength() != jsonrpc_version_length ||
+      std::memcmp(member->value.GetString(), FullMessage::JSONRPC_VERSION, jsonrpc_version_length) != 0)
+  {
+    throw cryptonote::json::WRONG_TYPE{"jsonrpc version \"2.0\""};
+  }
 }
 }
 
@@ -98,11 +174,11 @@ FullMessage::FullMessage(std::string&& json_string, bool request)
     throw cryptonote::json::PARSE_FAIL();
   }
 
-  OBJECT_HAS_MEMBER_OR_THROW(doc, "jsonrpc")
+  validate_jsonrpc_field(doc); // throws unless the version is exactly "2.0"
 
   if (request)
   {
-    get_method_field(doc); // throws on errors
+    get_method_field(doc); // throws on errors, including a non-canonical method name
     OBJECT_HAS_MEMBER_OR_THROW(doc, params_field)
     validate_id_field(doc);
   }
@@ -117,7 +193,13 @@ FullMessage::FullMessage(std::string&& json_string, bool request)
 
 std::string FullMessage::getRequestType() const
 {
-  return get_method_field(doc).GetString();
+  const rapidjson::Value& method = get_method_field(doc);
+  /* Constructed from pointer plus length: a `const char*` would end the name at
+     the first NUL, so a method such as `get_height\0suffix` would be handed to
+     method lookup as `get_height` and dispatch as that registered method. The
+     validation in `get_method_field` already rejects such a name; taking the
+     length from the DOM as well keeps this accessor exact on its own. */
+  return std::string{method.GetString(), method.GetStringLength()};
 }
 
 const rapidjson::Value& FullMessage::getMessage() const
@@ -240,10 +322,23 @@ epee::byte_slice BAD_REQUEST(const std::string& request, const rapidjson::Value&
 epee::byte_slice BAD_JSON(const std::string& error_details)
 {
   rapidjson::Value invalid;
+  return BAD_JSON(error_details, invalid);
+}
+
+epee::byte_slice BAD_JSON(const std::string& error_details, const rapidjson::Value& id)
+{
   Message fail;
   fail.status = Message::STATUS_BAD_JSON;
   fail.error_details = error_details;
-  return FullMessage::getResponse(fail, invalid);
+  return FullMessage::getResponse(fail, id);
+}
+
+epee::byte_slice INTERNAL_ERROR(const rapidjson::Value& id)
+{
+  Message fail;
+  fail.status = Message::STATUS_FAILED;
+  fail.error_details = internal_error_details;
+  return FullMessage::getResponse(fail, id);
 }
 
 epee::byte_slice REQUEST_TOO_LARGE()

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <ctime>
 
 #include <boost/function.hpp>
@@ -376,6 +377,42 @@ namespace cryptonote
       * @note see Blockchain::get_transactions
       */
      bool get_transactions(const std::vector<crypto::hash>& txs_ids, std::vector<transaction>& txs, std::vector<crypto::hash>& missed_txs, bool pruned = false) const;
+
+     /**
+      * @brief outcome of a transaction lookup
+      *
+      * The boolean transaction-lookup calls above report a hash that is not
+      * stored through their `missed_txs` out-parameter and every genuine
+      * failure - a storage error, or a stored blob that does not parse - as
+      * plain `false`, so a caller cannot tell a failure apart from an empty
+      * result without inspecting `missed_txs` as well. This type is that
+      * distinction, so that a caller such as an RPC handler can answer with a
+      * failure of its own rather than guessing. The failure's cause is not
+      * carried here: it is recorded by the storage layer where it is raised,
+      * because it names internal symbols and paths that must not travel any
+      * further towards a remote caller.
+      */
+     enum class tx_lookup_status : std::uint8_t
+     {
+       success = 0,     //!< the lookup completed; unfound hashes are listed in missed_txs
+       backend_failure  //!< the blockchain backend failed, or a stored transaction did not parse
+     };
+
+     /**
+      * @brief looks up transactions by hash, reporting failure as a typed status
+      *
+      * Equivalent to the `std::vector<transaction>` overload of
+      * get_transactions() in every observable respect except that its result is
+      * a tx_lookup_status rather than a bool.
+      *
+      * @param txs_ids the transaction hashes to look up
+      * @param txs return-by-reference the transactions that were found
+      * @param missed_txs return-by-reference the hashes that are not stored
+      *
+      * @return tx_lookup_status::success, or tx_lookup_status::backend_failure
+      *   if the backend failed or a stored transaction did not parse
+      */
+     tx_lookup_status lookup_transactions(const std::vector<crypto::hash>& txs_ids, std::vector<transaction>& txs, std::vector<crypto::hash>& missed_txs) const;
 
      /**
       * @copydoc Blockchain::get_block_by_hash

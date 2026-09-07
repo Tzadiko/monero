@@ -2597,6 +2597,8 @@ bool Blockchain::get_transactions_blobs(const std::vector<crypto::hash>& txs_ids
     }
     catch (const std::exception& e)
     {
+      // record the cause here: callers only see `false`, and nothing else does
+      LOG_ERROR("Failed to get transaction blob " << tx_hash << ": " << e.what());
       return false;
     }
   }
@@ -2689,6 +2691,8 @@ bool Blockchain::get_transactions(const t_ids_container& txs_ids, t_tx_container
     }
     catch (const std::exception& e)
     {
+      // record the cause here: callers only see `false`, and nothing else does
+      LOG_ERROR("Failed to get transaction " << tx_hash << ": " << e.what());
       return false;
     }
   }

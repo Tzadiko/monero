@@ -28,10 +28,12 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <boost/preprocessor/stringize.hpp>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <rapidjson/document.h>
 #include <rapidjson/ostreamwrapper.h>
 #include <rapidjson/prettywriter.h> 
+#include <string>
 
 #include "cryptonote_basic/account.h"
 #include "cryptonote_basic/cryptonote_basic.h"
@@ -40,6 +42,8 @@
 #include "cryptonote_core/cryptonote_tx_utils.h"
 #include "json_serialization.h"
 #include "net/zmq.h"
+#include "rpc/daemon_handler.h"
+#include "rpc/daemon_messages.h"
 #include "rpc/message.h"
 #include "rpc/zmq_pub.h"
 #include "rpc/zmq_restricted_methods.h"
@@ -84,6 +88,165 @@ TEST(ZmqFullMessage, Request)
   EXPECT_STREQ("foo", parsed.getRequestType().c_str());
 }
 
+TEST(ZmqFullMessage, RejectsUnsupportedJsonRpcVersion)
+{
+  // absent
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"id\":0,\"method\":\"get_height\",\"params\":[]}", true}),
+    cryptonote::json::MISSING_KEY
+  );
+  // not a string
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":2.0,\"id\":0,\"method\":\"get_height\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  // a version this daemon does not speak
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"1.0\",\"id\":0,\"method\":\"get_height\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  // too short and too long to be "2.0"
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2\",\"id\":0,\"method\":\"get_height\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0.1\",\"id\":0,\"method\":\"get_height\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  // "2.0" followed by an embedded NUL: accepted only by a comparison that stops at it
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\\u0000rubbish\",\"id\":0,\"method\":\"get_height\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+
+  // the same rule applies to a response envelope
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"1.0\",\"id\":0,\"result\":{}}", false}),
+    cryptonote::json::WRONG_TYPE
+  );
+  EXPECT_NO_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{}}", false})
+  );
+}
+
+TEST(ZmqFullMessage, RejectsNonCanonicalMethod)
+{
+  /* An escaped embedded NUL must not reach method lookup: as a C string the
+     name below ends at the NUL, so it would resolve to the registered
+     `get_height` handler even though the client did not name that method. */
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"get_height\\u0000suffix\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  // the same for a name that would alias an entry of the restricted-mode block list
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"set_log_level\\u0000x\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+
+  // empty
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  // control characters, whitespace, quoting and escaping bytes
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"get_height\\n\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"get height\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"get_height\\\\\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+  // non-ASCII
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"get_h\\u00e9ight\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+
+  // one character longer than the accepted maximum
+  const std::string too_long(cryptonote::rpc::FullMessage::MAX_METHOD_LENGTH + 1, 'a');
+  EXPECT_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"" + too_long + "\",\"params\":[]}", true}),
+    cryptonote::json::WRONG_TYPE
+  );
+
+  // exactly the accepted maximum, and every accepted character class
+  const std::string longest(cryptonote::rpc::FullMessage::MAX_METHOD_LENGTH, 'a');
+  EXPECT_NO_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"" + longest + "\",\"params\":[]}", true})
+  );
+  EXPECT_NO_THROW(
+    (cryptonote::rpc::FullMessage{"{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"Az09_.-\",\"params\":[]}", true})
+  );
+}
+
+TEST(ZmqFullMessage, RequestTypeIsLengthExact)
+{
+  const cryptonote::rpc::FullMessage parsed{
+    "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"get_tx_global_output_indices\",\"params\":[]}", true
+  };
+
+  const std::string request_type = parsed.getRequestType();
+  EXPECT_EQ(std::string{"get_tx_global_output_indices"}, request_type);
+  // no truncation: the returned length is the length of the JSON string itself
+  EXPECT_EQ(std::strlen("get_tx_global_output_indices"), request_type.size());
+}
+
+namespace
+{
+  //! Parse a response produced by one of the rpc error builders.
+  cryptonote::rpc::FullMessage parse_response(epee::byte_slice response)
+  {
+    return cryptonote::rpc::FullMessage{
+      std::string{reinterpret_cast<const char*>(response.data()), response.size()}, false
+    };
+  }
+}
+
+TEST(ZmqErrorResponse, BadJsonEchoesKnownId)
+{
+  const rapidjson::Value id{7};
+
+  cryptonote::rpc::FullMessage with_id = parse_response(cryptonote::rpc::BAD_JSON("bad params", id));
+  EXPECT_TRUE(with_id.getID().IsNumber());
+  EXPECT_EQ(7U, with_id.getID().GetUint());
+
+  const cryptonote::rpc::error error = with_id.getError();
+  EXPECT_TRUE(error.use);
+  EXPECT_STREQ(cryptonote::rpc::Message::STATUS_BAD_JSON, error.error_str.c_str());
+  EXPECT_STREQ("bad params", error.message.c_str());
+
+  // the id-less overload still answers with a null id, for a request that never parsed
+  cryptonote::rpc::FullMessage without_id = parse_response(cryptonote::rpc::BAD_JSON("bad envelope"));
+  EXPECT_TRUE(without_id.getID().IsNull());
+  EXPECT_STREQ(cryptonote::rpc::Message::STATUS_BAD_JSON, without_id.getError().error_str.c_str());
+}
+
+TEST(ZmqErrorResponse, InternalErrorDisclosesNothing)
+{
+  const rapidjson::Value id{"abc", 3};
+
+  cryptonote::rpc::FullMessage parsed = parse_response(cryptonote::rpc::INTERNAL_ERROR(id));
+
+  // the request id is echoed, so a client can correlate the failure
+  EXPECT_TRUE(parsed.getID().IsString());
+  EXPECT_STREQ("abc", parsed.getID().GetString());
+
+  /* The message is fixed: the builder takes no detail argument at all, so no
+     backend, standard-library or database exception text can reach a client
+     through this response. */
+  const cryptonote::rpc::error error = parsed.getError();
+  EXPECT_TRUE(error.use);
+  EXPECT_STREQ(cryptonote::rpc::Message::STATUS_FAILED, error.error_str.c_str());
+  EXPECT_STREQ("Internal error while handling the request", error.message.c_str());
+}
+
 TEST(ZmqRestrictedMethods, BasicCoverage)
 {
   EXPECT_TRUE(cryptonote::rpc::is_blocked_in_restricted_mode("flush_txpool"));
@@ -99,6 +262,372 @@ TEST(ZmqRestrictedMethods, BasicCoverage)
   EXPECT_FALSE(cryptonote::rpc::is_blocked_in_restricted_mode("get_height"));
   EXPECT_FALSE(cryptonote::rpc::is_blocked_in_restricted_mode("get_info"));
   EXPECT_FALSE(cryptonote::rpc::is_blocked_in_restricted_mode("send_raw_tx"));
+}
+
+namespace
+{
+  //! Serialize `src` exactly as the daemon writes a ZMQ response body.
+  template<typename Response>
+  epee::byte_stream write_response(const Response& src)
+  {
+    epee::byte_stream buffer;
+    {
+      rapidjson::Writer<epee::byte_stream> dest{buffer};
+      src.toJson(dest);
+    }
+    return buffer;
+  }
+
+  //! Read a serialized ZMQ response body back into a fresh `Response`.
+  template<typename Response>
+  Response read_response(const epee::byte_stream& buffer)
+  {
+    rapidjson::Document doc;
+    doc.Parse(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+    if (doc.HasParseError())
+      throw cryptonote::json::PARSE_FAIL();
+
+    Response out{};
+    out.fromJson(doc);
+    return out;
+  }
+
+  //! A `crypto::hash` whose every byte is non-zero and position dependent.
+  crypto::hash distinct_hash(const std::uint8_t first_byte)
+  {
+    crypto::hash out{};
+    for (std::size_t i = 0; i < sizeof(out.data); ++i)
+      out.data[i] = static_cast<char>(first_byte + i);
+    return out;
+  }
+
+  /*! The `get_blocks_fast` response body as a daemon that does not know
+    `top_block_hash` and `max_block_count` emits it. Built with the same
+    serializers the daemon uses, so it stays a valid payload of the frozen
+    DAEMON_RPC_VERSION_ZMQ 2.0 contract. */
+  epee::byte_stream get_blocks_fast_response_without_newer_fields()
+  {
+    epee::byte_stream buffer;
+    {
+      rapidjson::Writer<epee::byte_stream> dest{buffer};
+      dest.StartObject();
+      INSERT_INTO_JSON_OBJECT(dest, rpc_version, cryptonote::rpc::DAEMON_RPC_VERSION_ZMQ);
+      INSERT_INTO_JSON_OBJECT(dest, blocks, std::vector<cryptonote::rpc::block_with_transactions>{});
+      INSERT_INTO_JSON_OBJECT(dest, start_height, std::uint64_t(11));
+      INSERT_INTO_JSON_OBJECT(dest, current_height, std::uint64_t(22));
+      INSERT_INTO_JSON_OBJECT(dest, output_indices, std::vector<cryptonote::rpc::block_output_indices>{});
+      dest.EndObject();
+    }
+    return buffer;
+  }
+
+  cryptonote::rpc::peer make_peer(const std::uint32_t offset)
+  {
+    cryptonote::rpc::peer out{};
+    out.id = 0x0123456789abcdefull + offset;
+    out.ip = 0x0a000001u + offset;             // 10.0.0.1 and up, host byte order
+    out.port = static_cast<std::uint16_t>(18080 + offset);
+    out.rpc_port = static_cast<std::uint16_t>(18081 + offset);
+    out.rpc_credits_per_hash = 250u + offset;
+    out.last_seen = 1700000000ull + offset;
+    out.pruning_seed = 384u + offset;
+    return out;
+  }
+
+  //! \return An IPv4 peerlist entry whose every member is distinct and non-zero.
+  nodetool::peerlist_entry make_ipv4_peerlist_entry(const std::uint32_t offset)
+  {
+    nodetool::peerlist_entry out{};
+    out.adr = epee::net_utils::ipv4_network_address{
+      0x0a000001u + offset, static_cast<std::uint16_t>(18080 + offset)
+    };
+    out.id = 0x0123456789abcdefull + offset;
+    out.last_seen = static_cast<std::int64_t>(1700000000 + offset);
+    out.pruning_seed = 384u + offset;
+    out.rpc_port = static_cast<std::uint16_t>(18081 + offset);
+    out.rpc_credits_per_hash = 250u + offset;
+    return out;
+  }
+
+  //! \return A peerlist entry on a network the IPv4-only `peer` type cannot carry.
+  nodetool::peerlist_entry make_ipv6_peerlist_entry()
+  {
+    nodetool::peerlist_entry out{};
+    out.adr = epee::net_utils::ipv6_network_address{
+      boost::asio::ip::address_v6::loopback(), 18080
+    };
+    out.id = 0xdeadbeefdeadbeefull;
+    out.last_seen = 1700000099;
+    out.pruning_seed = 385;
+    out.rpc_port = 18082;
+    out.rpc_credits_per_hash = 251;
+    return out;
+  }
+
+  //! The disposition of every host that is not banned.
+  bool none_blocked(const epee::net_utils::network_address&) { return false; }
+
+  testing::AssertionResult peers_equal(const cryptonote::rpc::peer& expected, const cryptonote::rpc::peer& actual)
+  {
+    MASSERT(expected.id == actual.id);
+    MASSERT(expected.ip == actual.ip);
+    MASSERT(expected.port == actual.port);
+    MASSERT(expected.rpc_port == actual.rpc_port);
+    MASSERT(expected.rpc_credits_per_hash == actual.rpc_credits_per_hash);
+    MASSERT(expected.last_seen == actual.last_seen);
+    MASSERT(expected.pruning_seed == actual.pruning_seed);
+    return testing::AssertionSuccess();
+  }
+} // anonymous
+
+TEST(ZmqDaemonResponses, GetBlocksFastRoundTripKeepsTopBlockHashAndMaxBlockCount)
+{
+  cryptonote::rpc::GetBlocksFast::Response src{};
+  src.start_height = 1234;
+  src.current_height = 5678;
+  src.top_block_hash = distinct_hash(1);
+  src.max_block_count = COMMAND_RPC_GET_BLOCKS_FAST_MAX_BLOCK_COUNT;
+
+  ASSERT_NE(crypto::null_hash, src.top_block_hash);
+  ASSERT_NE(0u, src.max_block_count);
+
+  cryptonote::rpc::GetBlocksFast::Response out{};
+  ASSERT_NO_THROW(out = read_response<cryptonote::rpc::GetBlocksFast::Response>(write_response(src)));
+
+  EXPECT_EQ(src.start_height, out.start_height);
+  EXPECT_EQ(src.current_height, out.current_height);
+  EXPECT_EQ(src.top_block_hash, out.top_block_hash);
+  EXPECT_EQ(src.max_block_count, out.max_block_count);
+  EXPECT_TRUE(out.blocks.empty());
+  EXPECT_TRUE(out.output_indices.empty());
+}
+
+TEST(ZmqDaemonResponses, GetBlocksFastAcceptsResponseWithoutTopBlockHashOrMaxBlockCount)
+{
+  const epee::byte_stream buffer = get_blocks_fast_response_without_newer_fields();
+  rapidjson::Document doc;
+  doc.Parse(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+  ASSERT_FALSE(doc.HasParseError());
+  ASSERT_FALSE(doc.HasMember("top_block_hash"));
+  ASSERT_FALSE(doc.HasMember("max_block_count"));
+
+  // Deserialize into an object that already holds non-default values, so that the
+  // defaults asserted below can only come from the reader clearing them and never
+  // from the destination's initial value.
+  cryptonote::rpc::GetBlocksFast::Response out{};
+  out.top_block_hash = distinct_hash(9);
+  out.max_block_count = 4321;
+  ASSERT_NO_THROW(out.fromJson(doc));
+
+  EXPECT_EQ(11u, out.start_height);
+  EXPECT_EQ(22u, out.current_height);
+  EXPECT_EQ(crypto::null_hash, out.top_block_hash);
+  EXPECT_EQ(0u, out.max_block_count);
+  EXPECT_TRUE(out.blocks.empty());
+  EXPECT_TRUE(out.output_indices.empty());
+}
+
+TEST(ZmqDaemonHandler, NettypeNameCoversEveryNetwork)
+{
+  // The four names the HTTP get_info handler emits (core_rpc_server.cpp); the
+  // ZMQ get_info response must report exactly these for the same daemon.
+  EXPECT_STREQ("mainnet", cryptonote::rpc::get_nettype_name(cryptonote::MAINNET));
+  EXPECT_STREQ("testnet", cryptonote::rpc::get_nettype_name(cryptonote::TESTNET));
+  EXPECT_STREQ("stagenet", cryptonote::rpc::get_nettype_name(cryptonote::STAGENET));
+  EXPECT_STREQ("fakechain", cryptonote::rpc::get_nettype_name(cryptonote::FAKECHAIN));
+
+  // A locally generated chain is the only other case, and it must never be
+  // reported as an empty string, which is what the response used to carry.
+  EXPECT_STREQ("fakechain", cryptonote::rpc::get_nettype_name(cryptonote::UNDEFINED));
+  for (const cryptonote::network_type type : {cryptonote::MAINNET, cryptonote::TESTNET, cryptonote::STAGENET, cryptonote::FAKECHAIN, cryptonote::UNDEFINED})
+  {
+    EXPECT_STRNE("", cryptonote::rpc::get_nettype_name(type));
+  }
+}
+
+TEST(ZmqDaemonHandler, AppendPeerlistConvertsEveryFieldAndKeepsListsSeparate)
+{
+  const std::vector<nodetool::peerlist_entry> white{make_ipv4_peerlist_entry(0), make_ipv4_peerlist_entry(1)};
+  const std::vector<nodetool::peerlist_entry> gray{make_ipv4_peerlist_entry(2)};
+
+  // Converted once per list, exactly as the handler does it, so that the white
+  // and gray lists stay separate and neither leaks into the other.
+  std::vector<cryptonote::rpc::peer> white_out;
+  std::vector<cryptonote::rpc::peer> gray_out;
+  cryptonote::rpc::append_peerlist(none_blocked, white, white_out);
+  cryptonote::rpc::append_peerlist(none_blocked, gray, gray_out);
+
+  ASSERT_EQ(2u, white_out.size());
+  ASSERT_EQ(1u, gray_out.size());
+  EXPECT_TRUE(peers_equal(make_peer(0), white_out[0]));
+  EXPECT_TRUE(peers_equal(make_peer(1), white_out[1]));
+  EXPECT_TRUE(peers_equal(make_peer(2), gray_out[0]));
+}
+
+TEST(ZmqDaemonHandler, AppendPeerlistSkipsBlockedHosts)
+{
+  const std::vector<nodetool::peerlist_entry> source{
+    make_ipv4_peerlist_entry(0), make_ipv4_peerlist_entry(1), make_ipv4_peerlist_entry(2)
+  };
+  const auto blocked_address = source[1].adr;
+
+  std::vector<cryptonote::rpc::peer> out;
+  cryptonote::rpc::append_peerlist(
+    [&blocked_address](const epee::net_utils::network_address& address) { return address == blocked_address; },
+    source,
+    out
+  );
+
+  ASSERT_EQ(2u, out.size());
+  EXPECT_TRUE(peers_equal(make_peer(0), out[0]));
+  EXPECT_TRUE(peers_equal(make_peer(2), out[1]));
+
+  // Every host banned means an empty list, never a partially converted one.
+  std::vector<cryptonote::rpc::peer> none;
+  cryptonote::rpc::append_peerlist(
+    [](const epee::net_utils::network_address&) { return true; }, source, none
+  );
+  EXPECT_TRUE(none.empty());
+}
+
+TEST(ZmqDaemonHandler, AppendPeerlistSkipsAddressesThePeerTypeCannotCarry)
+{
+  // `cryptonote::rpc::peer` holds a 32-bit `ip`, so a non-IPv4 peer has no
+  // representation in the frozen response and must be dropped rather than
+  // emitted as a zero address.
+  const std::vector<nodetool::peerlist_entry> source{
+    make_ipv6_peerlist_entry(), make_ipv4_peerlist_entry(0), make_ipv6_peerlist_entry()
+  };
+
+  std::vector<cryptonote::rpc::peer> out;
+  cryptonote::rpc::append_peerlist(none_blocked, source, out);
+
+  ASSERT_EQ(1u, out.size());
+  EXPECT_TRUE(peers_equal(make_peer(0), out[0]));
+}
+
+TEST(ZmqDaemonHandler, AppendPeerlistAppendsRatherThanReplaces)
+{
+  std::vector<cryptonote::rpc::peer> out{make_peer(7)};
+  cryptonote::rpc::append_peerlist(none_blocked, {make_ipv4_peerlist_entry(0)}, out);
+
+  ASSERT_EQ(2u, out.size());
+  EXPECT_TRUE(peers_equal(make_peer(7), out[0]));
+  EXPECT_TRUE(peers_equal(make_peer(0), out[1]));
+}
+
+namespace
+{
+  /*! A `DaemonHandler` over a core and a p2p server that are constructed but
+    never initialised.
+
+    Both constructors are pure member initialisation - no database is opened, no
+    thread is started and no socket is bound - which is what makes a real
+    dispatch test possible here. The consequence is that only handlers which do
+    not reach the blockchain can be invoked: `get_peer_list` reads the p2p
+    server's peer lists, and an uninitialised server simply has no network zone,
+    so it reports empty lists. That is enough to prove the method is implemented
+    and dispatched, which is what the stub it replaced could never do. */
+  class daemon_handler_fixture
+  {
+  public:
+    explicit daemon_handler_fixture(const bool restricted)
+      : core_(nullptr)
+      , protocol_(core_, nullptr, true /* offline */)
+      , p2p_(protocol_)
+      , handler_(core_, p2p_, restricted)
+    {}
+
+    cryptonote::rpc::DaemonHandler& handler() noexcept { return handler_; }
+
+  private:
+    cryptonote::core core_;
+    cryptonote::t_cryptonote_protocol_handler<cryptonote::core> protocol_;
+    nodetool::node_server<cryptonote::t_cryptonote_protocol_handler<cryptonote::core>> p2p_;
+    cryptonote::rpc::DaemonHandler handler_;
+  };
+
+  //! \return The parsed response to `request` from a handler in the given mode.
+  rapidjson::Document dispatch(const bool restricted, const std::string& request)
+  {
+    daemon_handler_fixture fixture{restricted};
+    const epee::byte_slice response = fixture.handler().handle(std::string{request});
+
+    rapidjson::Document doc;
+    doc.Parse(reinterpret_cast<const char*>(response.data()), response.size());
+    if (doc.HasParseError())
+      throw cryptonote::json::PARSE_FAIL();
+    return doc;
+  }
+
+  constexpr const char get_peer_list_request[] =
+    "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"get_peer_list\",\"params\":{}}";
+}
+
+TEST(ZmqDaemonHandler, GetPeerListDispatchesAndSucceeds)
+{
+  rapidjson::Document doc;
+  ASSERT_NO_THROW(doc = dispatch(false /* restricted */, get_peer_list_request));
+
+  ASSERT_TRUE(doc.IsObject()) << doc;
+
+  // The method used to answer every call from a stub, which the envelope renders
+  // as an `error` object carrying "RPC method not yet implemented.". A success
+  // now carries `result` and no `error` at all.
+  ASSERT_FALSE(doc.HasMember("error")) << doc;
+  ASSERT_TRUE(doc.HasMember("result")) << doc;
+  const rapidjson::Value& result = doc["result"];
+  ASSERT_TRUE(result.IsObject()) << doc;
+
+  ASSERT_TRUE(result.HasMember("rpc_version")) << doc;
+  EXPECT_EQ(cryptonote::rpc::DAEMON_RPC_VERSION_ZMQ, result["rpc_version"].GetUint()) << doc;
+
+  // Both declared lists are present and are arrays. They are empty because an
+  // uninitialised p2p server has no network zone and therefore no peers.
+  ASSERT_TRUE(result.HasMember("white_list")) << doc;
+  ASSERT_TRUE(result.HasMember("gray_list")) << doc;
+  EXPECT_TRUE(result["white_list"].IsArray()) << doc;
+  EXPECT_TRUE(result["gray_list"].IsArray()) << doc;
+}
+
+TEST(ZmqDaemonHandler, GetPeerListIsRefusedInRestrictedMode)
+{
+  rapidjson::Document doc;
+  ASSERT_NO_THROW(doc = dispatch(true /* restricted */, get_peer_list_request));
+
+  // Implementing the method must not have made it reachable without privileges:
+  // the restricted check runs before dispatch, so there is no `result` at all.
+  ASSERT_FALSE(doc.HasMember("result")) << doc;
+  ASSERT_TRUE(doc.HasMember("error")) << doc;
+  const rapidjson::Value& error = doc["error"];
+  ASSERT_TRUE(error.IsObject()) << doc;
+
+  ASSERT_TRUE(error.HasMember("error_str")) << doc;
+  EXPECT_STREQ(cryptonote::rpc::Message::STATUS_FAILED, error["error_str"].GetString()) << doc;
+  ASSERT_TRUE(error.HasMember("message")) << doc;
+  EXPECT_STREQ(
+    "\"get_peer_list\" is not available in restricted mode.",
+    error["message"].GetString()
+  ) << doc;
+}
+
+TEST(ZmqDaemonResponses, GetPeerListRoundTripKeepsEveryPeerField)
+{
+  cryptonote::rpc::GetPeerList::Response src{};
+  src.white_list.push_back(make_peer(0));
+  src.white_list.push_back(make_peer(1));
+  src.gray_list.push_back(make_peer(2));
+
+  cryptonote::rpc::GetPeerList::Response out{};
+  ASSERT_NO_THROW(out = read_response<cryptonote::rpc::GetPeerList::Response>(write_response(src)));
+
+  ASSERT_EQ(src.white_list.size(), out.white_list.size());
+  ASSERT_EQ(src.gray_list.size(), out.gray_list.size());
+
+  for (std::size_t i = 0; i < src.white_list.size(); ++i)
+    EXPECT_TRUE(peers_equal(src.white_list[i], out.white_list[i]));
+  for (std::size_t i = 0; i < src.gray_list.size(); ++i)
+    EXPECT_TRUE(peers_equal(src.gray_list[i], out.gray_list[i]));
 }
 
 namespace
