@@ -35,7 +35,6 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/fusion/adapted/std_pair.hpp>
-#include <boost/optional/optional.hpp>
 #include <boost/range/algorithm/find_if.hpp>
 #include <boost/range/iterator_range_core.hpp>
 #include <boost/spirit/include/karma_char.hpp>
@@ -55,11 +54,8 @@
 #include <boost/spirit/include/qi_plus.hpp>
 #include <boost/spirit/include/qi_sequence.hpp>
 #include <boost/spirit/include/qi_string.hpp>
-#include <algorithm>
 #include <chrono>
-#include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <iterator>
 #include <openssl/evp.h>
 #include <string>
@@ -158,22 +154,13 @@ struct http_request_capture
   std::string sent;
 };
 
-/*! Drives the epee HTTP listener with `chunks` and captures what it sent.
-  \param user Login to require; when set, the listener answers an
-    unauthenticated request with a digest challenge.
-  \param request_rng Nonce source, required whenever `user` is set. */
-http_request_capture feed_http_request(
-  const std::vector<std::string>& chunks,
-  const boost::optional<http::login>& user = boost::none,
-  std::function<void(size_t, uint8_t*)> request_rng = nullptr)
+http_request_capture feed_http_request(const std::vector<std::string>& chunks)
 {
   capturing_http_handler handler;
   test_http_endpoint endpoint;
   epee::net_utils::connection_context_base context;
   http::custum_handler_config<epee::net_utils::connection_context_base> config;
   config.m_phandler = &handler;
-  config.m_user = user;
-  config.rng = std::move(request_rng);
 
   http::http_custom_handler<epee::net_utils::connection_context_base> connection(&endpoint, config, context);
   std::vector<bool> results;
@@ -216,15 +203,13 @@ std::string write_fields(const fields& args)
   return out;
 }
 
-//! \param target Request target the server observes; must match the credential `uri`.
-http::http_request_info make_request(const fields& args, const std::string& target = std::string{})
+http::http_request_info make_request(const fields& args)
 {
   std::string out{"   DIGEST   "};
   write_fields(out, args);
 
   http::http_request_info request{};
   request.m_http_method_str = "NOP";
-  request.m_URI = target;
   request.m_header_info.m_etc_fields.push_back(
     std::make_pair("authorization", std::move(out))
   );
@@ -511,7 +496,7 @@ TEST(HTTP_Server_Auth, MD5)
     {"response", quoted(auth_code)},
     {"uri", quoted(uri)},
     {"username", quoted(user.username)}
-  }, uri);
+  });
 
   EXPECT_FALSE(bool(auth.get_response(request)));
 
@@ -562,7 +547,7 @@ TEST(HTTP_Server_Auth, MD5_sess)
     {"response", quoted(auth_code)},
     {"uri", quoted(uri)},
     {"username", quoted(user.username)}
-  }, uri);
+  });
 
   EXPECT_FALSE(bool(auth.get_response(request)));
 
@@ -623,7 +608,7 @@ TEST(HTTP_Server_Auth, MD5_auth)
     {"username", quoted(user.username)}
   };
 
-  const auto request = make_request(args, uri);
+  const auto request = make_request(args);
   EXPECT_FALSE(bool(auth.get_response(request)));
 
   for (unsigned i = 2; i < 20; ++i)
@@ -631,7 +616,7 @@ TEST(HTTP_Server_Auth, MD5_auth)
     nc = get_nc(i);
     args.at("nc") = nc;
     args.at("response") = quoted(generate_auth());
-    EXPECT_FALSE(auth.get_response(make_request(args, uri)));
+    EXPECT_FALSE(auth.get_response(make_request(args)));
   }
 
   const auto replay = auth.get_response(request);
@@ -691,7 +676,7 @@ TEST(HTTP_Server_Auth, MD5_sess_auth)
     {"username", quoted(user.username)}
   };
 
-  const auto request = make_request(args, uri);
+  const auto request = make_request(args);
   EXPECT_FALSE(bool(auth.get_response(request)));
 
   for (unsigned i = 2; i < 20; ++i)
@@ -699,7 +684,7 @@ TEST(HTTP_Server_Auth, MD5_sess_auth)
     nc = get_nc(i);
     args.at("nc") = nc;
     args.at("response") = quoted(generate_auth());
-    EXPECT_FALSE(auth.get_response(make_request(args, uri)));
+    EXPECT_FALSE(auth.get_response(make_request(args)));
   }
 
   const auto replay = auth.get_response(request);
@@ -714,75 +699,6 @@ TEST(HTTP_Server_Auth, MD5_sess_auth)
   EXPECT_STREQ("true", parsed_replay[0].at("stale").c_str());
 }
 
-// RFC 2617 section 3.2.2: the server must check that the resource named by the
-// credential `uri` is the resource in the request line. A credential minted for
-// one target must therefore be rejected when it is presented against another,
-// even though its nonce and use count are still valid.
-TEST(HTTP_Server_Auth, MD5_auth_target_mismatch)
-{
-  constexpr const char cnonce[] = "not a nonce";
-  constexpr const char qop[] = "auth";
-
-  const std::string credential_uri{"/some_foo_thing"};
-  const std::string other_target{"/json_rpc"};
-
-  http::login user{"foo", "bar"};
-  http::http_server_auth auth{user, rng};
-
-  // Builds a valid qop=auth credential for `uri` against `challenge`.
-  const auto make_credential =
-    [&] (const auth_responses& challenge, const std::string& uri, const std::string& nc)
-  {
-    const std::string& nonce = challenge.at(0).at("nonce");
-    const std::string auth_code = md5_hex(
-      boost::join(
-        std::vector<std::string>{
-          md5_hex(get_a1(user, challenge)), nonce, nc, cnonce, qop, md5_hex(get_a2(uri))
-        },
-        ":"
-      )
-    );
-
-    return fields{
-      {"algorithm", quoted("md5")},
-      {"cnonce", quoted(cnonce)},
-      {"nc", nc},
-      {"nonce", quoted(nonce)},
-      {"qop", quoted(qop)},
-      {"realm", quoted(challenge.at(0).at("realm"))},
-      {"response", quoted(auth_code)},
-      {"uri", quoted(uri)},
-      {"username", quoted(user.username)}
-    };
-  };
-
-  const auto challenge = auth.get_response(make_request(fields{}));
-  ASSERT_TRUE(bool(challenge));
-  EXPECT_TRUE(is_unauthorized(*challenge));
-
-  const auto parsed = parse_response(*challenge);
-  ASSERT_LE(2u, parsed.size());
-  EXPECT_TRUE(has_same_fields(parsed));
-
-  // A credential that is valid for `credential_uri`, presented against a
-  // different request target, must be refused.
-  const auto mismatch = auth.get_response(
-    make_request(make_credential(parsed, credential_uri, get_nc(1)), other_target)
-  );
-  ASSERT_TRUE(bool(mismatch));
-  EXPECT_TRUE(is_unauthorized(*mismatch));
-
-  const auto parsed_mismatch = parse_response(*mismatch);
-  ASSERT_LE(2u, parsed_mismatch.size());
-  EXPECT_TRUE(has_same_fields(parsed_mismatch));
-  EXPECT_NE(parsed.at(0).at("nonce"), parsed_mismatch.at(0).at("nonce"));
-
-  // The same construction against the matching target is accepted, which shows
-  // the refusal above was caused by the target and not by a bad credential.
-  EXPECT_FALSE(bool(auth.get_response(
-    make_request(make_credential(parsed_mismatch, credential_uri, get_nc(1)), credential_uri)
-  )));
-}
 
 TEST(HTTP_Auth, DogFood)
 {
@@ -1000,101 +916,6 @@ TEST(HTTP, Parse_Header_Line)
   EXPECT_FALSE(http::detail::parse_header_line("GET / HTTP/1.1", name, value));
 }
 
-TEST(HTTP, Escape_For_Log)
-{
-  std::string value{"va\r\nlue\twith\\odd"};
-  value.push_back(static_cast<char>(0x80));
-
-  const std::string escaped = http::detail::escape_for_log(value);
-
-  // No raw control byte survives, so a client cannot forge a log record.
-  EXPECT_EQ(std::string::npos, escaped.find('\r'));
-  EXPECT_EQ(std::string::npos, escaped.find('\n'));
-  EXPECT_EQ(std::string::npos, escaped.find('\t'));
-  EXPECT_EQ(std::string::npos, escaped.find(static_cast<char>(0x80)));
-
-  EXPECT_NE(std::string::npos, escaped.find("\\x0d"));
-  EXPECT_NE(std::string::npos, escaped.find("\\x0a"));
-  EXPECT_NE(std::string::npos, escaped.find("\\x09"));
-  EXPECT_NE(std::string::npos, escaped.find("\\x80"));
-  EXPECT_NE(std::string::npos, escaped.find("\\\\odd"));
-  EXPECT_NE(std::string::npos, escaped.find("va"));
-
-  EXPECT_STREQ("", http::detail::escape_for_log(boost::string_ref{}).c_str());
-  EXPECT_STREQ("plain value", http::detail::escape_for_log("plain value").c_str());
-
-  // An over-long value is truncated at the source-byte bound and the marker
-  // states the original byte length.
-  const std::string long_value(http::detail::max_logged_value_bytes * 2 + 7, 'a');
-  const std::string long_escaped = http::detail::escape_for_log(long_value);
-  EXPECT_TRUE(boost::starts_with(
-    long_escaped, std::string(http::detail::max_logged_value_bytes, 'a') + "...[truncated, "
-  ));
-  EXPECT_NE(std::string::npos, long_escaped.find(std::to_string(long_value.size())));
-}
-
-TEST(HTTP, Summarize_Header_Block)
-{
-  const std::string credential{
-    "Digest username=\"foo\", realm=\"monero-rpc\", nonce=\"KRPvSjMKrRnPTZgHUJVxWQ==\","
-    " uri=\"/json_rpc\", qop=\"auth\", nc=00000001, cnonce=\"not a nonce\","
-    " response=\"1d2f0e6b8ac31d4f2b5c7e90a1b3c4d5\""
-  };
-  const std::string block{
-    "Host: example.com\r\n"
-    "Authorization: " + credential + "\r\n"
-    "\r\n"
-  };
-
-  const std::string summary = http::detail::summarize_header_block(block);
-
-  // Field names and value lengths are reported ...
-  EXPECT_NE(std::string::npos, summary.find("Host (11 byte value)"));
-  EXPECT_NE(std::string::npos, summary.find("Authorization ("));
-  EXPECT_NE(
-    std::string::npos,
-    summary.find(std::to_string(credential.size()) + " byte value")
-  );
-
-  // ... and no part of any value, credential or not.
-  EXPECT_EQ(std::string::npos, summary.find("Digest"));
-  EXPECT_EQ(std::string::npos, summary.find("username"));
-  EXPECT_EQ(std::string::npos, summary.find("foo"));
-  EXPECT_EQ(std::string::npos, summary.find("KRPvSjMKrRnPTZgHUJVxWQ=="));
-  EXPECT_EQ(std::string::npos, summary.find("1d2f0e6b8ac31d4f2b5c7e90a1b3c4d5"));
-  EXPECT_EQ(std::string::npos, summary.find("example.com"));
-  EXPECT_EQ(std::string::npos, summary.find('\r'));
-  EXPECT_EQ(std::string::npos, summary.find('\n'));
-
-  // A field name carrying CR or LF cannot inject a line break.
-  const std::string injected =
-    http::detail::summarize_header_block("X-In\rject: value\r\nX-Other: value\r\n");
-  EXPECT_EQ(std::string::npos, injected.find('\r'));
-  EXPECT_EQ(std::string::npos, injected.find('\n'));
-  EXPECT_NE(std::string::npos, injected.find("X-In\\x0dject (5 byte value)"));
-  EXPECT_NE(std::string::npos, injected.find("X-Other (5 byte value)"));
-
-  // A line with no ':' has no field name.
-  const std::string malformed =
-    http::detail::summarize_header_block("Bad Header Without Colon\r\n");
-  EXPECT_STREQ("<malformed field> (24 bytes)", malformed.c_str());
-
-  EXPECT_STREQ("<no fields>", http::detail::summarize_header_block("\r\n").c_str());
-
-  // The number of fields described is bounded, and the remainder counted.
-  std::string many{};
-  const std::size_t field_count = http::detail::max_logged_header_fields + 5;
-  for (std::size_t i = 0; i < field_count; ++i)
-    many += "X-Field: value\r\n";
-
-  const std::string bounded = http::detail::summarize_header_block(many);
-  EXPECT_EQ(
-    http::detail::max_logged_header_fields,
-    static_cast<std::size_t>(std::count(bounded.begin(), bounded.end(), '('))
-  );
-  EXPECT_NE(std::string::npos, bounded.find("[5 more fields]"));
-}
-
 TEST(HTTP, Server_Parses_Content_Length_First_Header)
 {
   const std::string body = "0123456789";
@@ -1191,44 +1012,6 @@ TEST(HTTP, Server_Keeps_Unknown_First_Header)
   ASSERT_EQ(1u, capture.requests.front().m_header_info.m_etc_fields.size());
   EXPECT_STREQ("X-Test", capture.requests.front().m_header_info.m_etc_fields.front().first.c_str());
   EXPECT_STREQ("abc", capture.requests.front().m_header_info.m_etc_fields.front().second.c_str());
-}
-
-// No response may advertise the server framework (CWE-200).
-TEST(HTTP, Server_Omits_Framework_Header)
-{
-  const auto capture = feed_http_request(
-    "GET / HTTP/1.1\r\n"
-    "Host: example.com\r\n"
-    "\r\n"
-  );
-
-  ASSERT_EQ(1u, capture.results.size());
-  ASSERT_TRUE(capture.results.front());
-  EXPECT_NE(std::string::npos, capture.sent.find("HTTP/1.1 200 OK\r\n"));
-  EXPECT_NE(std::string::npos, capture.sent.find("Content-Length: "));
-  EXPECT_EQ(std::string::npos, capture.sent.find("Server:"));
-  EXPECT_EQ(std::string::npos, capture.sent.find("Epee"));
-}
-
-TEST(HTTP, Server_Omits_Framework_Header_When_Unauthorized)
-{
-  const auto capture = feed_http_request(
-    std::vector<std::string>{
-      "GET /json_rpc HTTP/1.1\r\n"
-      "Host: example.com\r\n"
-      "\r\n"
-    },
-    http::login{"foo", "bar"},
-    rng
-  );
-
-  ASSERT_EQ(1u, capture.results.size());
-  EXPECT_TRUE(capture.results.front());
-  EXPECT_TRUE(capture.requests.empty()); // the request never reached the handler
-  EXPECT_NE(std::string::npos, capture.sent.find("401 Unauthorized"));
-  EXPECT_NE(std::string::npos, capture.sent.find("WWW-authenticate: Digest"));
-  EXPECT_EQ(std::string::npos, capture.sent.find("Server:"));
-  EXPECT_EQ(std::string::npos, capture.sent.find("Epee"));
 }
 
 TEST(HTTP, Client_Keeps_Unknown_Header)

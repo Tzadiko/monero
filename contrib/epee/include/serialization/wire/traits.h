@@ -71,14 +71,11 @@ namespace wire
 
   /*! Mark `T` as fixed binary data for reading+writing. Concept requirements
       for reading:
-        * `T` must be compatible with `epee::as_mut_byte_span`.
+        * `T` must be compatible with `epee::as_mut_byte_span` (standard-layout
+          and trivial, and no padding).
       Concept requirements for writing:
-        * `T` must be compatible with `epee::as_byte_span`.
-      Both helpers (see `span.h`) require a non-empty, standard-layout `T` with
-      a unique object representation (`std::has_unique_object_representations`)
-      - that is, trivially copyable with no padding bits and no alternate
-      representation of any value. A non-trivial default constructor is
-      therefore permitted, while floating-point types are rejected. */
+        * `T` must be compatible with `epee::as_byte_span` (standard-layout and
+          trivial, and no padding). */
   template<typename T>
   struct is_blob : std::false_type
   {};

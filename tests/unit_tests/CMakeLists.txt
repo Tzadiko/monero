@@ -104,8 +104,7 @@ set(unit_tests_sources
   is_hdd.cpp
   aligned.cpp
   rpc_version_str.cpp
-  zmq_rpc.cpp
-  zmq_server_log.cpp)
+  zmq_rpc.cpp)
 
 set(unit_tests_headers
   unit_tests_utils.h)

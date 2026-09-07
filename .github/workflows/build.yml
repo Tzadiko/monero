@@ -9,8 +9,6 @@ on:
     paths-ignore:
       - 'docs/**'
       - '**/README.md'
-  # Lets the Apple Clang floor gate below be run on demand.
-  workflow_dispatch:
 
 # The below variables reduce repetitions across similar targets
 env:
@@ -31,8 +29,8 @@ env:
     env GTEST_FILTER="-DNSResolver.*:AddressFromURL.*:select_outputs.*" ctest --output-on-failure -E "functional_tests_rpc|core_tests|cnv4-jit|hash-variant2-int-sqrt|wide_difficulty"
   USE_DEVICE_TREZOR_MANDATORY: ON
   INSTALL_RUST: |
-    curl -O https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init
-    echo "dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71 rustup-init" | sha256sum -c
+    curl -O https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init
+    echo "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10 rustup-init" | sha256sum -c
     chmod +x rustup-init
     ./rustup-init -y --default-toolchain 1.93
     echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -72,48 +70,6 @@ jobs:
         with:
           path: /Users/runner/Library/Caches/ccache
           key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
-
-  # The Apple Clang 15 (Xcode 15) floor enforced by the root CMakeLists.txt has
-  # never been demonstrated: macOS-latest ships a newer Xcode, so 'macOS (brew)'
-  # above verifies that one instead. This job is the gate that moves the Apple
-  # Clang row of the compatibility matrix in
-  # docs/COMPILING_DEBUGGING_TESTING.md from declared to verified. It is
-  # dispatched by hand because no push needs it; the Xcode and Apple Clang
-  # versions it passes with belong in that matrix, and if it fails, the floor is
-  # raised there, in README.md and in the guard together.
-  build-macos-xcode15:
-    name: 'macOS (Xcode 15 floor)'
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-      - name: select the pinned Xcode 15
-        run: |
-          set -eu
-          xcode=$(ls -d /Applications/Xcode_15*.app 2>/dev/null | sort -V | tail -1 || true)
-          if [ -z "$xcode" ]; then
-            echo "This runner image carries no Xcode 15.x, so the Apple Clang 15 floor cannot be validated on it." >&2
-            exit 1
-          fi
-          sudo xcode-select -s "$xcode"
-          xcodebuild -version
-          c++ --version
-      - uses: ./.github/actions/set-make-job-count
-      - name: install dependencies
-        run: |
-          brew uninstall cmake
-          brew update
-          brew install --quiet cmake boost hidapi openssl zmq unbound protobuf ccache
-      - name: build
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: ${{env.MAKE_JOB_COUNT}}
-        run: |
-          ${{env.CCACHE_SETTINGS}}
-          ${{env.BUILD_DEFAULT}}
-      - name: reduced tests
-        run: ${{env.CTEST_EXCLUDE_SLOW}}
 
   build-windows:
     name: 'Windows (MSYS2)'
@@ -198,17 +154,11 @@ jobs:
           # Oldest supported Debian version
           - name: Debian 13
             container: debian:13
-            digest: sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
           # Oldest supported Ubuntu LTS version
           - name: Ubuntu 24.04
             container: ubuntu:24.04
-            digest: sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
     container:
-      # `container` stays a bare tag because the ccache keys below are derived from it,
-      # while `digest` pins the multi-architecture image index the tag resolved to, so the
-      # tag cannot be moved under a root job that holds checkout credentials and writes
-      # caches. Refresh a tag and its digest together, through a reviewed pull request.
-      image: ${{ matrix.container }}@${{ matrix.digest }}
+      image: ${{ matrix.container }}
       env:
         DEBIAN_FRONTEND: noninteractive
     steps:
@@ -255,10 +205,8 @@ jobs:
           # Most popular Ubuntu LTS version
           - name: Ubuntu 24.04
             container: ubuntu:24.04
-            digest: sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
     container:
-      # Tag plus pinned image index digest, as in `build-linux` above.
-      image: ${{ matrix.container }}@${{ matrix.digest }}
+      image: ${{ matrix.container }}
       env:
         DEBIAN_FRONTEND: noninteractive
       # Setting up a loop device (losetup) requires additional capabilities.

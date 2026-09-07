@@ -72,12 +72,15 @@
 #include "hex.h"
 #include "string_coding.h"
 
-/* This file restricts protocol string literals and parser tokens to ASCII
-characters. Under the supported toolchains' UTF-8 execution character sets,
-ordinary narrow string literals therefore produce the exact bytes required by
-HTTP digest authentication.
+/* This file uses the `u8` prefix and specifies all chars by ASCII numeric
+value. This is for maximum portability - C++ does not actually specify ASCII
+as the encoding type for unprefixed string literals, etc. Although rare, the
+effort required to support rare compiler encoding types is low.
 
-The qi::ascii parsers below are intentionally limited to ASCII input. */
+Also be careful of qi::ascii character classes (`qi::asci::alpha`, etc.) -
+non-ASCII characters will cause undefined behavior in the table lookup until
+boost 1.60. The expression `&qi::ascii::char_` will fail on non-ASCII
+characters without "consuming" the input character. */
 
 namespace
 {
@@ -354,28 +357,14 @@ namespace
     using iterator = const char*;
     enum status{ kFail = 0, kStale, kPass };
 
-    /*! \param method HTTP method from the request line.
-        \param target Request target from the request line, as observed by the
-          server. RFC 2617 section 3.2.2 requires the server to verify that the
-          resource named by the credential's `uri` directive is the resource in
-          the request line; `verify` therefore rejects any mismatch below. This
-          stops a credential minted for one target from being replayed against
-          another target while its nonce and use count are still valid.
-        \param request Value of the client "Authorization" field.
-        \param user Server-side session state for the configured login.
-
-        \return Status of the `response` field from the client */
-    static status verify(const boost::string_ref method, const boost::string_ref target,
-      const boost::string_ref request, const http::http_server_auth::session& user)
+    //! \return Status of the `response` field from the client
+    static status verify(const boost::string_ref method, const boost::string_ref request,
+      const http::http_server_auth::session& user)
     {
       const auto parsed = parse(request);
       if (parsed &&
           boost::equals(parsed->username, user.credentials.username) &&
-          // request targets are case-sensitive, so this comparison is byte-exact.
-          // A credential omitting the required `uri` directive has an empty
-          // `uri` and is rejected here.
-          boost::equals(parsed->uri, target) &&
-          boost::fusion::any(digest_algorithms, has_valid_response{*parsed, user, method, target}))
+          boost::fusion::any(digest_algorithms, has_valid_response{*parsed, user, method}))
       {
         if (boost::equals(parsed->nonce, user.nonce))
         {
@@ -597,12 +586,7 @@ namespace
               return false;
           }
 
-          // A2 is computed from the server-observed target, never from the
-          // credential-supplied `uri`. `auth_message::verify` has already
-          // rejected any mismatch between the two, so this is the same digest
-          // for every accepted request, and no digest input can be chosen by
-          // an intermediary that rewrote the request line.
-          auto auth = digest(method, ":", target);
+          auto auth = digest(method, ":", request.uri);
           if (!auth)
             return false;
           if (request.qop.empty())
@@ -622,7 +606,6 @@ namespace
       const auth_message& request;
       const http::http_server_auth::session& user;
       const boost::string_ref method;
-      const boost::string_ref target; //!< Server-observed request target
     };
 
     boost::optional<std::uint32_t> counter() const
@@ -725,11 +708,6 @@ namespace
     template<typename Digest>
     void operator()(const Digest& digest) const
     {
-      // `auth` is the only qop mode advertised, because it is the mode that the
-      // RFC 2617 clients in use implement. Its A2 digest covers the method and
-      // the request target, not the entity body; the integrity note on
-      // `http_server_auth` in http_auth.h states what that does and does not
-      // prove, and what compensates for it.
       static constexpr const auto fvalue = ceref("Digest qop=\"auth\"");
 
       for (unsigned i = 0; i < 2; ++i)
@@ -794,7 +772,7 @@ namespace epee
         if (auth != fields.end())
         {
           ++(user->counter);
-          switch (auth_message::verify(request.m_http_method_str, request.m_URI, auth->second, *user))
+          switch (auth_message::verify(request.m_http_method_str, auth->second, *user))
           {
           case auth_message::kPass:
             return boost::none;

@@ -48,9 +48,6 @@ namespace
     8192, // objects
     16384, // fields
     16384, // strings
-    true, // trailing zeroes are padding: a notification sent over a noise channel
-          // is padded out to the channel's fixed size with zeroes, and the padding
-          // arrives inside the payload (levin_base.cpp, make_fragmented_notify)
   };
 }
 

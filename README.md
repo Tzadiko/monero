@@ -135,40 +135,29 @@ Approximately three months prior to a scheduled software upgrade, a branch from 
 
 ### Dependencies
 
-The following table summarizes the tools and libraries required to build. A
-few of the libraries are also included in this repository (marked as
-"Vendored"). By default, the build uses the library installed on the system
-and ignores the vendored sources. However, if no library is found installed
-on the system, then the vendored source will be built and used. The vendored
-sources are also used for statically-linked builds because distribution
-packages often include only shared library binaries (`.so`) but not static
-library archives (`.a`). The "Min. version" column is a build floor — the
-oldest version the tree is known to compile and link against — and not a
-statement that the version is still supported or free of known
-vulnerabilities; the security note below the table gives the versions to
-actually build and run against.
+The following table summarizes the tools and libraries required to build. A few of the libraries are also included in this repository (marked as "Vendored"). By default, the build uses the library installed on the system and ignores the vendored sources. However, if no library is found installed on the system, then the vendored source will be built and used. The vendored sources are also used for statically-linked builds because distribution packages often include only shared library binaries (`.so`) but not static library archives (`.a`).
 
-| Dep          | Min. version                                                                       | Vendored | Debian/Ubuntu pkg    | Arch pkg     | Void pkg           | Fedora pkg          | Optional | Purpose                                                        |
-| ------------ | ---------------------------------------------------------------------------------- | -------- | -------------------- | ------------ | ------------------ | ------------------- | -------- | -------------------------------------------------------------- |
-| GCC          | 13                                                                                 | NO       | `build-essential`    | `base-devel` | `base-devel`       | `gcc`               | NO       |                                                                |
-| CMake        | 3.25                                                                               | NO       | `cmake`              | `cmake`      | `cmake`            | `cmake`             | NO       |                                                                |
-| pkg-config   | any                                                                                | NO       | `pkg-config`         | `base-devel` | `base-devel`       | `pkgconf`           | NO       |                                                                |
-| Rust         | any stable that builds `src/fcmp_pp/fcmp_pp_rust`; 1.93 is the CI-tested toolchain | NO       | `rustup`             | `rust`       | `rust cargo`       | `rust cargo`        | NO       | FCMP++ library                                                 |
-| Boost        | 1.69                                                                               | NO       | `libboost-all-dev`   | `boost`      | `boost-devel`      | `boost-devel`       | NO       | C++ libraries (declared; 1.83 and 1.91.0 verified under C++23) |
-| OpenSSL      | 1.1.1                                                                              | NO       | `libssl-dev`         | `openssl`    | `openssl-devel`    | `openssl-devel`     | NO       | cryptography (C API; 3.0.13 verified, 3.5.7 pinned in depends; see the security note) |
-| libzmq       | 4.2.0                                                                              | NO       | `libzmq3-dev`        | `zeromq`     | `zeromq-devel`     | `zeromq-devel`      | NO       | ZeroMQ library (build floor; see the security note)            |
-| libunbound   | 1.4.16                                                                             | NO       | `libunbound-dev`     | `unbound`    | `unbound-devel`    | `unbound-devel`     | NO       | DNS resolver (build floor; see the security note)              |
-| libsodium    | ?                                                                                  | NO       | `libsodium-dev`      | `libsodium`  | `libsodium-devel`  | `libsodium-devel`   | NO       | cryptography (see the security note)                           |
-| libunwind    | any                                                                                | NO       | `libunwind-dev`      | `libunwind`  | `libunwind-devel`  | `libunwind-devel`   | YES      | Stack traces                                                   |
-| libreadline  | 6.3.0                                                                              | NO       | `libreadline-dev`    | `readline`   | `readline-devel`   | `readline-devel`    | YES      | Input editing (build floor; see the security note)             |
-| GTest        | 1.5                                                                                | YES      | `libgtest-dev`       | `gtest`      | `gtest-devel`      | `gtest-devel`       | YES      | Test suite                                                     |
-| ccache       | any                                                                                | NO       | `ccache`             | `ccache`     | `ccache`           | `ccache`            | YES      | Compil. cache                                                  |
-| Doxygen      | any                                                                                | NO       | `doxygen`            | `doxygen`    | `doxygen`          | `doxygen`           | YES      | Documentation                                                  |
-| Graphviz     | any                                                                                | NO       | `graphviz`           | `graphviz`   | `graphviz`         | `graphviz`          | YES      | Documentation                                                  |
-| libhidapi    | ?                                                                                  | NO       | `libhidapi-dev`      | `hidapi`     | `hidapi-devel`     | `hidapi-devel`      | YES      | Hardware wallet                                                |
-| libusb       | ?                                                                                  | NO       | `libusb-1.0-0-dev`   | `libusb`     | `libusb-devel`     | `libusb1-devel`     | YES      | Hardware wallet                                                |
-| libprotobuf  | ?                                                                                  | NO       | `libprotobuf-dev`    | `protobuf`   | `protobuf-devel`   | `protobuf-devel`    | YES      | Hardware wallet                                                |
-| protoc       | ?                                                                                  | NO       | `protobuf-compiler`  | `protobuf`   | `protobuf`         | `protobuf-compiler` | YES      | Hardware wallet                                                |
+| Dep         | Min. version                                                                       | Vendored | Debian/Ubuntu pkg   | Arch pkg     | Void pkg          | Fedora pkg          | Optional | Purpose                                                        |
+| ----------- | ---------------------------------------------------------------------------------- | -------- | ------------------- | ------------ | ----------------- | ------------------- | -------- | -------------------------------------------------------------- |
+| GCC         | 13                                                                                 | NO       | `build-essential`   | `base-devel` | `base-devel`      | `gcc`               | NO       |                                                                |
+| CMake       | 3.25                                                                               | NO       | `cmake`             | `cmake`      | `cmake`           | `cmake`             | NO       |                                                                |
+| pkg-config  | any                                                                                | NO       | `pkg-config`        | `base-devel` | `base-devel`      | `pkgconf`           | NO       |                                                                |
+| Rust        | any stable that builds `src/fcmp_pp/fcmp_pp_rust`; 1.93 is the CI-tested toolchain | NO       | `rustup`            | `rust`       | `rust cargo`      | `rust cargo`        | NO       | FCMP++ library                                                 |
+| Boost       | 1.69                                                                               | NO       | `libboost-all-dev`  | `boost`      | `boost-devel`     | `boost-devel`       | NO       | C++ libraries (declared; 1.83 and 1.91.0 verified under C++23) |
+| OpenSSL     | 1.1.1                                                                              | NO       | `libssl-dev`        | `openssl`    | `openssl-devel`   | `openssl-devel`     | NO       | cryptography (C API; 3.0.13 verified, 3.5.7 pinned in depends) |
+| libzmq      | 4.2.0                                                                              | NO       | `libzmq3-dev`       | `zeromq`     | `zeromq-devel`    | `zeromq-devel`      | NO       | ZeroMQ library                                                 |
+| libunbound  | 1.4.16                                                                             | NO       | `libunbound-dev`    | `unbound`    | `unbound-devel`   | `unbound-devel`     | NO       | DNS resolver                                                   |
+| libsodium   | ?                                                                                  | NO       | `libsodium-dev`     | `libsodium`  | `libsodium-devel` | `libsodium-devel`   | NO       | cryptography                                                   |
+| libunwind   | any                                                                                | NO       | `libunwind-dev`     | `libunwind`  | `libunwind-devel` | `libunwind-devel`   | YES      | Stack traces                                                   |
+| libreadline | 6.3.0                                                                              | NO       | `libreadline-dev`   | `readline`   | `readline-devel`  | `readline-devel`    | YES      | Input editing                                                  |
+| GTest       | 1.5                                                                                | YES      | `libgtest-dev`      | `gtest`      | `gtest-devel`     | `gtest-devel`       | YES      | Test suite                                                     |
+| ccache      | any                                                                                | NO       | `ccache`            | `ccache`     | `ccache`          | `ccache`            | YES      | Compil. cache                                                  |
+| Doxygen     | any                                                                                | NO       | `doxygen`           | `doxygen`    | `doxygen`         | `doxygen`           | YES      | Documentation                                                  |
+| Graphviz    | any                                                                                | NO       | `graphviz`          | `graphviz`   | `graphviz`        | `graphviz`          | YES      | Documentation                                                  |
+| libhidapi   | ?                                                                                  | NO       | `libhidapi-dev`     | `hidapi`     | `hidapi-devel`    | `hidapi-devel`      | YES      | Hardware wallet                                                |
+| libusb      | ?                                                                                  | NO       | `libusb-1.0-0-dev`  | `libusb`     | `libusb-devel`    | `libusb1-devel`     | YES      | Hardware wallet                                                |
+| libprotobuf | ?                                                                                  | NO       | `libprotobuf-dev`   | `protobuf`   | `protobuf-devel`  | `protobuf-devel`    | YES      | Hardware wallet                                                |
+| protoc      | ?                                                                                  | NO       | `protobuf-compiler` | `protobuf`   | `protobuf`        | `protobuf-compiler` | YES      | Hardware wallet                                                |
 
 Rust and `cargo` are required on `master`. Install them with rustup (as CI
 does) on every platform, or from the distribution package where one is named
@@ -180,79 +169,23 @@ Monero is compiled as C++23 and requires GCC 13, Clang 16, Apple Clang 15
 standard-library pairings are GCC with libstdc++ 13 or 14, Clang 16 with
 libstdc++ 13, and Clang 18 with libstdc++ 14 (Boost 1.84 or newer for a
 warning-clean build). Clang 16 with libstdc++ 14 does not compile the tree,
-and Clang with libc++ is not a verified pairing. The Apple Clang 15 floor is
-declared and enforced at configure time but has not itself been demonstrated:
-the Apple compiler with continuous evidence behind it is the newer Xcode that
-`macOS-latest` ships and that the `macOS (brew)` CI job builds on every push,
-while the pinned Xcode 15 run that would make the floor a verified one is the
-`macOS (Xcode 15 floor)` workflow job and has not been run yet. The full
-compatibility matrix — the authoritative statement of the floors, of which
-pairings are verified, and of the evidence behind each one — is the
+and Clang with libc++ is not a verified pairing. The full compatibility
+matrix — the authoritative statement of the floors, of which pairings are
+verified, and of the evidence behind each one — is the
 ["Toolchain requirements"](docs/COMPILING_DEBUGGING_TESTING.md#toolchain-requirements)
 section of
 [docs/COMPILING_DEBUGGING_TESTING.md](docs/COMPILING_DEBUGGING_TESTING.md).
 
-**Dependency versions and security.** Apart from OpenSSL's declared 1.1.1
-floor and Boost's 1.69, the build does not check the version of any library in
-the table, so the versions to build and run against are these: OpenSSL 3.5.8
-or 3.6.4 or newer (1.1.1 is out of public support, 3.0.13 is behind the 3.0
-branch's current 3.0.22, and the 3.5.7 pinned in `contrib/depends` predates
-3.5.8), libzmq 4.3.5 or newer (the 4.2.0 floor sits
-inside the affected range of CVE-2019-6250, a remote code execution issue, and
-of CVE-2020-15166), libunbound 1.25.2 or newer (the 1.4.16 floor dates from
-2012 and predates CVE-2014-8602 and every later fix, and 1.25.1 fixed the
-critical CVE-2026-33278), libsodium 1.0.21 or newer (the 1.0.18 pinned in
-`contrib/depends` predates its security fixes) and libreadline 8.0 or newer
-(the bare 6.3.0 floor predates the patch that fixes CVE-2014-2524). Current
-distribution packages generally satisfy all of these. Raising the declared
-floors and the deterministic `contrib/depends` pins is a maintainers' decision
-that is deliberately not part of the C++23 migration; the per-dependency
-status, including the pins and the FreeBSD cross-build target whose sysroot is
-end-of-life, is recorded in
-["Dependency security posture"](docs/COMPILING_DEBUGGING_TESTING.md#dependency-security-posture).
-
-Install all system dependencies at once on Debian/Ubuntu:
+Install all dependencies at once on Debian/Ubuntu:
 
 ```
 sudo apt update && sudo apt install build-essential cmake pkg-config libssl-dev libzmq3-dev libunbound-dev libsodium-dev libunwind-dev libreadline-dev libhidapi-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libboost-regex-dev libboost-serialization-dev libboost-system-dev libboost-thread-dev python3 ccache doxygen graphviz git curl
 ```
 
-That command installs the system dependencies only. Rust and `cargo` are
+That command installs the system dependencies only: Rust and `cargo` are
 mandatory on `master` and are not among them, and the `rustc` and `cargo`
 packaged by Debian and Ubuntu are older than the toolchain CI tests with, so
-install the toolchain through rustup. Debian 13 and Ubuntu 24.04 package
-rustup itself, but at 1.28.1, which RUSTSEC-2026-0067 and RUSTSEC-2026-0068
-affect; rustup 1.29.1 or newer is required. Use the packaged rustup only when
-it reports a version at or above that, or when your distribution states it has
-backported those fixes — otherwise use the verified installer below instead:
-
-```bash
-sudo apt install rustup
-rustup --version    # must report 1.29.1 or newer before you continue
-rustup toolchain install 1.93
-rustup default 1.93
-```
-
-Where the packaged rustup is older than 1.29.1, or absent as on older
-releases, download the installer CI pins and verify it before running it;
-never pipe a download into a shell, which runs whatever the server returned
-without checking it. The steps below are
-chained with `&&`, so the installer runs only when its checksum matches the
-one [.github/workflows/build.yml](.github/workflows/build.yml) verifies. That
-checksum is for the x86_64 Linux installer — for another host, substitute its
-target triple in `url` and check against the `rustup-init.sha256` published
-beside that installer:
-
-```bash
-sha256=dda7234360b7f578ca8b0ddcb80145646fa61a67c1720a5abc7051b35c9fcb71
-url=https://static.rust-lang.org/rustup/archive/1.29.1/x86_64-unknown-linux-gnu/rustup-init
-curl --proto '=https' --tlsv1.2 --fail -O "$url" &&
-  echo "$sha256  rustup-init" | sha256sum -c &&
-  chmod +x rustup-init &&
-  ./rustup-init -y --default-toolchain 1.93
-```
-
-Either way, make sure `$HOME/.cargo/bin` is on your `PATH`.
+install the toolchain through rustup.
 
 Install all dependencies at once on Arch:
 ```
@@ -414,29 +347,7 @@ Binaries for Windows can be built on Windows using the MinGW toolchain within [M
     pacman -S mingw-w64-ucrt-x86_64-toolchain make mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-boost mingw-w64-ucrt-x86_64-openssl mingw-w64-ucrt-x86_64-zeromq mingw-w64-ucrt-x86_64-libsodium mingw-w64-ucrt-x86_64-hidapi mingw-w64-ucrt-x86_64-unbound mingw-w64-ucrt-x86_64-rust
     ```
 
-* Check the versions of the two dependencies that have to be current, because
-  the build does not check them and a Windows binary linked against either of
-  them below these versions is vulnerable:
-
-    ```bash
-    pacman -Qi mingw-w64-ucrt-x86_64-unbound mingw-w64-ucrt-x86_64-openssl | grep -E '^(Name|Version)'
-    ```
-
-  Unbound must be 1.25.2 or newer. Every release from 1.19.1 to 1.25.0 is
-  affected by CVE-2026-33278 (CVSS 9.8): a use-after-free in the DNSSEC
-  validator that a malicious signed zone can turn into a crash or code
-  execution inside the resolver, reachable through any name the daemon looks
-  up. 1.25.1 fixed it and 1.25.2 — the version `contrib/depends` pins — adds
-  the later fixes. OpenSSL must be 3.6.4 or newer (or 3.5.8 or newer on the
-  3.5 branch). If the MSYS2 repository still offers an older package, run
-  `pacman -Syu` and check again, and do not publish binaries from that
-  environment until both packages are current: build the dependency from its
-  own release tarball into the UCRT64 prefix instead, or wait for the fixed
-  package. The other pinned deterministic versions and their status are listed
-  in
-  ["Dependency security posture"](docs/COMPILING_DEBUGGING_TESTING.md#dependency-security-posture).
-
-* Open the UCRT64 shell via the `MSYS2 UCRT64` shortcut.
+* Open the MingW shell via `MSYS2 UCRT64` shortcut.
 
 **Cloning**
 

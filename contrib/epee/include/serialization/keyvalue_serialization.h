@@ -67,6 +67,7 @@ public: \
       return false; \
     }\
   }\
+  /*template<typename T> T& this_type_resolver() { return *this; }*/ \
   template<bool is_store, class t_storage> \
   bool serialize_map(t_storage& stg, typename t_storage::hsection hparent_section) \
   { \

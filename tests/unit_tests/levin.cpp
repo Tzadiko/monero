@@ -250,9 +250,7 @@ namespace
                 throw std::logic_error{"Unexpected ID at front of message queue"};
 
             epee::serialization::portable_storage storage{};
-            // the same limits the levin handlers parse with, so that a payload
-            // padded by a noise channel is read here exactly as a peer reads it
-            if(!storage.load_from_binary(epee::strspan<std::uint8_t>(queue.front().payload), std::addressof(default_levin_limits)))
+            if(!storage.load_from_binary(epee::strspan<std::uint8_t>(queue.front().payload)))
                 throw std::logic_error{"Unable to parse epee binary format"};
 
             typename T::request request{};
@@ -547,50 +545,6 @@ TEST(make_fragment, single)
     ASSERT_EQ(1024, fragment.size());
     EXPECT_TRUE(std::memcmp(std::addressof(header), fragment.data(), sizeof(header)) == 0);
     EXPECT_EQ(1024 - sizeof(header), std::count(noise.cbegin() + sizeof(header), noise.cend(), 0));
-}
-
-TEST(make_fragment, padded_payload_parses_only_under_levin_limits)
-{
-    /* A notification that fits in one noise packet is padded out to the channel
-       size with zeroes and sent as a normal, unfragmented message, so the payload
-       the receiving handler hands to the parser carries that padding. The parser
-       requires a caller to declare padding before it tolerates it, so the levin
-       limits accept this payload and a caller that passes no limits does not. */
-    epee::serialization::portable_storage source{};
-    ASSERT_TRUE(source.set_value("x", std::uint64_t(42), nullptr));
-    epee::byte_slice body{};
-    ASSERT_TRUE(source.store_to_binary(body));
-
-    epee::levin::message_writer message;
-    message.buffer.write(epee::to_span(body));
-
-    const epee::byte_slice noise = epee::levin::make_noise_notify(1024);
-    epee::byte_slice notification = epee::levin::make_fragmented_notify(noise.size(), 11, std::move(message));
-    ASSERT_EQ(1024, notification.size());
-
-    // what async_protocol_handler hands to the command handler
-    notification.take_slice(sizeof(epee::levin::bucket_head2));
-    const std::string payload{reinterpret_cast<const char*>(notification.data()), notification.size()};
-    ASSERT_LT(body.size(), payload.size()) << "the notification was not padded";
-
-    {
-        epee::serialization::portable_storage storage{};
-        ASSERT_TRUE(storage.load_from_binary(epee::strspan<std::uint8_t>(payload), std::addressof(default_levin_limits)));
-        std::uint64_t value = 0;
-        EXPECT_TRUE(storage.get_value("x", value, nullptr));
-        EXPECT_EQ(std::uint64_t(42), value);
-    }
-    {
-        epee::serialization::portable_storage storage{};
-        EXPECT_FALSE(storage.load_from_binary(epee::strspan<std::uint8_t>(payload)));
-    }
-    {
-        // and content in the padding is rejected even for levin
-        std::string tampered = payload;
-        tampered.back() = 'a';
-        epee::serialization::portable_storage storage{};
-        EXPECT_FALSE(storage.load_from_binary(epee::strspan<std::uint8_t>(tampered), std::addressof(default_levin_limits)));
-    }
 }
 
 TEST(make_fragment, multiple)

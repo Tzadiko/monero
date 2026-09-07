@@ -272,21 +272,6 @@ namespace tools
       void fill_transfer_entry(tools::wallet_rpc::transfer_entry &entry, const crypto::hash &txid, const tools::wallet2::unconfirmed_transfer_details &pd) const;
       void fill_transfer_entry(tools::wallet_rpc::transfer_entry &entry, const crypto::hash &payment_id, const tools::wallet2::pool_payment_details &pd) const;
       bool not_open(epee::json_rpc::error& er);
-      /*! Log `public_message` together with the text of `e` server-side, and return only
-        `public_message` for use as a JSON-RPC error message. Standard-library, filesystem, parser
-        and internal wallet exceptions carry internal paths, symbol text and state-dependent
-        detail in `what()`; serialising that to a caller discloses server internals (CWE-209), and
-        a caller able to induce such failures on purpose can mine them.
-
-        The detail reaches the operator and no one else, and this record writes it bounded and
-        control-byte escaped, because exception text routinely embeds request-supplied values.
-        It is not redacted further: the wallet log is an operator-only artefact that already holds
-        wallet paths and state by design - `THROW_WALLET_EXCEPTION_IF` logs the throw location and
-        `to_string()` of every wallet error, unescaped, before this ever runs - and the detail is
-        what diagnosis needs.
-
-        \return `public_message` as a `std::string`. */
-      static std::string handled_error(const std::exception &e, const char *public_message);
       void handle_rpc_exception(const std::exception_ptr& e, epee::json_rpc::error& er, int default_error_code);
 
       template<typename Ts, typename Tu, typename Tk, typename Ta>

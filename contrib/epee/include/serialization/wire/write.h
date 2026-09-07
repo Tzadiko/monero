@@ -47,8 +47,8 @@
     * `namespace wire { void write_bytes(writer&, const ns::type&); }`
     * `namespace ns { void write_bytes(wire::writer&, const type&); }`
 
-  See `traits.h` for `is_array` and `is_blob` requirements. `write_bytes`
-  function can also specify derived type for faster
+  See `wrappers.h` for `is_array` requirements, and `traits.h` for `is_blob`
+  requirements. `write_bytes` function can also specify derived type for faster
   output (i.e.  `namespace ns { void write_bytes(wire::epee_writer&, type&); }`).
   Using the derived type allows the compiler to de-virtualize and allows for
   custom functions not defined by base interface. Using base interface allows

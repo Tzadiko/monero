@@ -54,12 +54,6 @@ namespace epee
         size_t n_objects;
         size_t n_fields;
         size_t n_strings; // not counting field names
-        /*! Whether a transport may append zero bytes after the root section. Only
-            levin sets this: a notification sent over a noise channel is padded out
-            to the channel's fixed size with zeroes, and the padding is part of the
-            payload the parser is handed. Every other transport delivers exactly
-            one message, so trailing bytes there are not padding and are rejected. */
-        bool trailing_zeroes_are_padding = false;
       };
 
       portable_storage(){}
@@ -93,13 +87,6 @@ namespace epee
       //-------------------------------------------------------------------------------
       bool		store_to_binary(byte_slice& target, std::size_t initial_buffer_size = 8192);
       bool		store_to_binary(byte_stream& ss);
-      /*! Reads the block header and the single root section that follows it and
-        requires that this consumed all of \p target. A transport that pads its
-        messages says so with limits_t::trailing_zeroes_are_padding, and only
-        then are trailing zero bytes tolerated.
-        \return False when the header is malformed, when the root section cannot
-          be parsed within \p limits, or when any byte of \p target remains
-          unconsumed and \p limits does not permit it as padding. */
       bool		load_from_binary(const epee::span<const uint8_t> target, const limits_t *limits = nullptr);
       bool		load_from_binary(const std::string& target, const limits_t *limits = nullptr)
       {

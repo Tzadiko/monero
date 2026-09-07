@@ -110,31 +110,7 @@ namespace serialization
       if (limits)
         buf_reader.set_limits(limits->n_objects, limits->n_fields, limits->n_strings);
       buf_reader.read(m_root);
-      /* The root section must have consumed the whole buffer. store_to_binary
-         emits the block header and the root section and nothing else, so a caller
-         that hands over one message has nothing left over, and returning success
-         with bytes remaining would admit a non-canonical encoding of every
-         message - the same payload could then be read one way by this node and
-         another way by anything else parsing it.
-
-         The single exception is a transport that pads: a levin notification sent
-         over a noise channel is padded out to the channel's fixed size with zero
-         bytes, and that padding is part of the payload the reader is handed
-         (contrib/epee/src/levin_base.cpp, make_fragmented_notify: "the levin
-         binary parser will ignore extra bytes. So just pad with zeroes"). Such a
-         caller says so through its limits, and even then only zero bytes are
-         tolerated. */
-      if(buf_reader.remaining())
-      {
-        const bool is_padding = limits && limits->trailing_zeroes_are_padding && buf_reader.remaining_is_zeroed();
-        if(!is_padding)
-        {
-          LOG_ERROR("portable_storage: wrong binary format - " << buf_reader.remaining() << " byte(s) left unconsumed after the root section");
-          m_root.m_entries.clear();
-          return false;
-        }
-      }
-      return true;
+      return true;//TODO:
       CATCH_ENTRY("portable_storage::load_from_binary", false);
     }
     

@@ -64,7 +64,7 @@ namespace tools {
       static_assert(std::is_standard_layout<T>::value && std::is_trivial<T>::value,
                     "T cannot be auto-scrubbed. T must be POD.");
       static_assert(std::is_trivially_destructible<T>::value,
-                    "T cannot be auto-scrubbed. T must be trivially destructible.");
+                    "T cannot be auto-scrubbed. T must be trivially destructable.");
       memwipe(this, sizeof(T));
     }
   };

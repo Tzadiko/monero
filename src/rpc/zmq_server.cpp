@@ -29,9 +29,7 @@
 #include "zmq_server.h"
 
 #include <chrono>
-#include <cstddef>
 #include <cstring>
-#include <string>
 #include <utility>
 #include <stdexcept>
 #include <system_error>
@@ -193,26 +191,14 @@ void ZmqServer::serve()
         }
         else // no errors
         {
-          /* Log the frame LENGTH ONLY - never any part of the frame itself, and
-             identically in both server modes. This request is unauthenticated
-             remote input of up to `net::zmq::max_message_size` bytes: logging any
-             of it verbatim lets a peer forge or split log records with embedded
-             CR/LF and smuggle terminal escape sequences into an operator's
-             console (CWE-117), and retains raw request, transaction and peer data
-             in the log (CWE-532). The length is the only detail safe to record
-             here, and it is read before the frame moves into the handler. */
-          const std::size_t request_size = message->size();
-          MDEBUG("Received RPC request (" << request_size << " bytes)");
-
+          if (restricted)
+            MDEBUG("Received RPC request");
+          else
+            MDEBUG("Received RPC request: \"" << *message << "\"");
           epee::byte_slice response = handler.handle(std::move(*message));
 
-          /* Length only here too, for the same reasons: the reply echoes
-             caller-chosen fields (the JSON-RPC `id`, for one) and carries daemon
-             data, so logging any of it verbatim reopens both CWE-117 log forgery
-             and CWE-532 retention on this unauthenticated listener. */
           const boost::string_ref response_view{reinterpret_cast<const char*>(response.data()), response.size()};
-          MDEBUG("Sending RPC reply (" << response_view.size() << " bytes)");
-
+          MDEBUG("Sending RPC reply: \"" << response_view << "\"");
           MONERO_UNWRAP(net::zmq::send(std::move(response), rep.get()));
         }
       }
