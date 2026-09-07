@@ -1,3 +1,7 @@
+# This version predates the later libsodium security releases; 1.0.21 or newer is
+# the version to build against. Raising it is a deliberate dependency update
+# that invalidates the depends caches, and is tracked in
+# docs/COMPILING_DEBUGGING_TESTING.md, "Dependency security posture".
 package=sodium
 $(package)_version=1.0.18
 $(package)_download_path=https://github.com/jedisct1/libsodium/releases/download/$($(package)_version)-RELEASE

@@ -207,6 +207,22 @@ namespace tools
       }
     };
     //----------------------------------------------------------------------------------------------------
+    // A piecemeal output import whose range starts past the outputs this wallet already holds.
+    // That is a recoverable, caller-facing condition of the export_outputs/import_outputs
+    // protocol - the caller retries from an earlier range - and not a server-internal fault.
+    // Every site that throws it must compose the message out of fixed literals only, naming the
+    // condition and carrying no wallet state, because a server may serve this type's what() to
+    // the caller instead of redacting it. It derives from wallet_internal_error so that every
+    // existing handler of that type keeps catching it exactly as before; only a handler that
+    // names this type can tell it apart.
+    struct imported_outputs_omit_known_outputs : public wallet_internal_error
+    {
+      explicit imported_outputs_omit_known_outputs(std::string&& loc, const std::string& message)
+        : wallet_internal_error(std::move(loc), message)
+      {
+      }
+    };
+    //----------------------------------------------------------------------------------------------------
     struct multisig_export_needed : public wallet_runtime_error
     {
       explicit multisig_export_needed(std::string&& loc)

@@ -1,3 +1,7 @@
+# The sysroot these compilers are pointed at is the end-of-life FreeBSD 12.3
+# base archive pinned by packages/freebsd_base.mk; artifacts built against it
+# are security-blocked for publication (see that file and
+# docs/COMPILING_DEBUGGING_TESTING.md, "Cross-build dialect exceptions").
 freebsd_CC=env -u C_INCLUDE_PATH -u CPLUS_INCLUDE_PATH \
                -u OBJC_INCLUDE_PATH -u OBJCPLUS_INCLUDE_PATH -u CPATH \
                -u LIBRARY_PATH clang --target=$(host) --sysroot=$(build_prefix)/sysroot -iwithsysroot/usr/include

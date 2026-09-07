@@ -31,10 +31,8 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstddef>
 #include <cstring>
 #include <stdexcept>
-#include <string>
 #include <unordered_set>
 
 #include <boost/uuid/nil_generator.hpp>
@@ -45,7 +43,6 @@
 #include "cryptonote_basic/cryptonote_format_utils.h"
 #include "cryptonote_basic/blobdatatype.h"
 #include "ringct/rctSigs.h"
-#include "serialization/json_object.h"
 #include "version.h"
 
 namespace
@@ -55,47 +52,6 @@ constexpr auto restricted_histogram_cutoff = std::chrono::hours{3 * 24};
 constexpr size_t restricted_max_txs = 100;
 constexpr size_t restricted_max_key_images = 5000;
 constexpr size_t restricted_max_block_headers = 1000;
-
-/*! Number of payload characters a log line may carry. Anything longer is
-  truncated with its full length recorded, so an unbounded remote payload can
-  neither dominate the log nor be retained in it (CWE-532). */
-constexpr std::size_t max_logged_chars = 128;
-
-/*! \return `src` rendered safe for a single log line.
-
-  Everything a caller controls reaches the log through this function. Control
-  characters - including the newlines and carriage returns that would otherwise
-  let a remote caller forge or split log records (CWE-117) - backslashes and
-  non-ASCII bytes are replaced by `\xHH` escapes, and the result is capped at
-  `max_logged_chars` characters with a marker giving the original length. */
-std::string sanitize_for_log(const boost::string_ref src)
-{
-  static constexpr const char hex_digits[] = "0123456789abcdef";
-
-  const std::size_t copied = std::min(src.size(), max_logged_chars);
-  std::string out;
-  out.reserve(copied);
-
-  for (std::size_t i = 0; i < copied; ++i)
-  {
-    const unsigned char byte = static_cast<unsigned char>(src[i]);
-    if (byte == '\\')
-      out += "\\\\";
-    else if (byte < 0x20 || byte >= 0x7f)
-    {
-      out += "\\x";
-      out.push_back(hex_digits[byte >> 4]);
-      out.push_back(hex_digits[byte & 0x0f]);
-    }
-    else
-      out.push_back(static_cast<char>(byte));
-  }
-
-  if (copied < src.size())
-    out += "...[" + std::to_string(src.size()) + " characters total]";
-
-  return out;
-}
 }
 
 namespace cryptonote
@@ -103,11 +59,6 @@ namespace cryptonote
 
 namespace rpc
 {
-  const char* get_nettype_name(const network_type type) noexcept
-  {
-    return type == MAINNET ? "mainnet" : type == TESTNET ? "testnet" : type == STAGENET ? "stagenet" : "fakechain";
-  }
-
   namespace
   {
     using handler_function = epee::byte_slice(DaemonHandler& handler, const rapidjson::Value& id, const rapidjson::Value& msg);
@@ -168,63 +119,6 @@ namespace rpc
       {"start_mining", handle_message<StartMining>},
       {"stop_mining", handle_message<StopMining>}
     };
-
-    /*! Resolve `request_type` against the handler table and run the handler it
-      names, answering `id`.
-
-      This is the dispatch and execution part of `DaemonHandler::handle`, which
-      keeps the envelope part. Failures here are not malformed requests, so each
-      answer carries the request's own id: malformed parameters for a valid
-      method keep the malformed-json status, and a handler or response
-      serializer that throws becomes one stable failure whose cause is logged
-      rather than sent to the client (CWE-209).
-
-      \param handler the daemon handler the resolved method is invoked on
-      \param restricted whether restricted-mode method blocking applies
-      \param request_type a canonical method name, already validated
-      \param id the request id, echoed into every answer
-      \param parameters the request's `params` member */
-    epee::byte_slice dispatch_request(DaemonHandler& handler,
-                                      const bool restricted,
-                                      const std::string& request_type,
-                                      const rapidjson::Value& id,
-                                      const rapidjson::Value& parameters)
-    {
-      try
-      {
-        if (restricted && is_blocked_in_restricted_mode(request_type))
-        {
-          Message fail;
-          fail.status = Message::STATUS_FAILED;
-          fail.error_details = "\"" + request_type + "\" is not available in restricted mode.";
-          return FullMessage::getResponse(fail, id);
-        }
-
-        const auto matched_handler = std::lower_bound(std::begin(handlers), std::end(handlers), request_type);
-        if (matched_handler == std::end(handlers) || matched_handler->method_name != request_type)
-          return BAD_REQUEST(request_type, id);
-
-        epee::byte_slice response = matched_handler->call(handler, id, parameters);
-
-        MDEBUG("Returning RPC response for method \"" << sanitize_for_log(request_type) << "\" (" << response.size() << " bytes)");
-
-        return response;
-      }
-      catch (const cryptonote::json::JSON_ERROR& e)
-      {
-        /* The envelope was a request, but its `params` did not match the
-           method's schema. That is malformed json from a client that is now
-           identified, so the id is echoed back with it. This text is produced
-           by this daemon's own deserializers and names no internal detail. */
-        MDEBUG("Rejecting malformed parameters for method \"" << sanitize_for_log(request_type) << "\": " << sanitize_for_log(e.what()));
-        return BAD_JSON(e.what(), id);
-      }
-      catch (const std::exception& e)
-      {
-        MERROR("Failed to handle RPC request for method \"" << sanitize_for_log(request_type) << "\": " << e.what());
-        return INTERNAL_ERROR(id);
-      }
-    }
   } // anonymous
 
   DaemonHandler::DaemonHandler(cryptonote::core& c, t_p2p& p2p, bool restricted)
@@ -332,12 +226,6 @@ namespace rpc
       block_count++;
     }
 
-    // Advertise the block-count ceiling this handler enforces, so that a client
-    // can size its next request instead of discovering the cap by truncation.
-    // It is the very limit handed to find_blockchain_supplement() above; the ZMQ
-    // request carries no client-supplied cap, so the enforced value is constant.
-    res.max_block_count = COMMAND_RPC_GET_BLOCKS_FAST_MAX_BLOCK_COUNT;
-
     res.status = Message::STATUS_OK;
   }
 
@@ -369,19 +257,13 @@ namespace rpc
     std::vector<cryptonote::transaction> found_txs_vec;
     std::vector<crypto::hash> missed_vec;
 
-    /* Uses the typed lookup contract rather than the boolean overload: a hash
-       that is simply not stored is reported through `missed_vec` and is not a
-       failure, while a storage or parse failure arrives as
-       `tx_lookup_status::backend_failure` and is translated below into one
-       stable public error. The cause of that failure is recorded by the storage
-       layer where it is raised and is deliberately not disclosed here. */
-    const cryptonote::core::tx_lookup_status lookup =
-      m_core.lookup_transactions(req.tx_hashes, found_txs_vec, missed_vec);
+    bool r = m_core.get_transactions(req.tx_hashes, found_txs_vec, missed_vec);
 
-    if (lookup != cryptonote::core::tx_lookup_status::success)
+    // TODO: consider fixing core::get_transactions to not hide exceptions
+    if (!r)
     {
       res.status = Message::STATUS_FAILED;
-      res.error_details = "Failed to look up transactions";
+      res.error_details = "core::get_transactions() returned false (exception caught there)";
       return;
     }
 
@@ -496,12 +378,7 @@ namespace rpc
     std::string tx_blob;
     if(!epee::string_tools::parse_hexstr_to_binbuff(req.tx_as_hex, tx_blob))
     {
-      /* `send_raw_tx_hex` is reachable in restricted mode, so this string is
-         remote input that failed to parse. It is described by its length only:
-         logging it verbatim would let a caller forge log records and would
-         retain an arbitrary payload in the daemon log (CWE-117/CWE-532), and it
-         is not a transaction, so there is nothing to identify it by hash. */
-      MERROR("[SendRawTxHex]: Failed to parse tx from hexbuff (" << req.tx_as_hex.size() << " characters)");
+      MERROR("[SendRawTxHex]: Failed to parse tx from hexbuff: " << req.tx_as_hex);
       res.status = Message::STATUS_FAILED;
       res.error_details = "Invalid hex";
       return;
@@ -604,13 +481,7 @@ namespace rpc
     r.txs.push_back(std::move(tx_blob));
     m_core.get_protocol()->relay_transactions(r, boost::uuids::nil_uuid(), epee::net_utils::zone::invalid, relay_method::local);
 
-    // `relayed` is reported as queued-for-relay, which is what has just happened:
-    // the transaction was accepted into the pool and handed to the protocol relay
-    // path. It is deliberately not a statement that any peer received the
-    // transaction - no such acknowledgement exists at this point, since peers do
-    // not confirm a relayed transaction - and it must not be read as one. The
-    // relay-suppressed branch above reports `relayed = false` for the case where
-    // the transaction was accepted but never handed over.
+    //TODO: make sure that tx has reached other nodes here, probably wait to receive reflections from other nodes
     res.status = Message::STATUS_OK;
     res.relayed = true;
 
@@ -702,12 +573,6 @@ namespace rpc
     res.info.mainnet = m_core.get_nettype() == MAINNET;
     res.info.testnet = m_core.get_nettype() == TESTNET;
     res.info.stagenet = m_core.get_nettype() == STAGENET;
-    // The three flags above cannot name the fakechain network, which is why the
-    // contract also carries `nettype`. get_nettype_name() holds the spelling,
-    // taken verbatim from the HTTP get_info handler (core_rpc_server.cpp): the
-    // two RPC surfaces describe one and the same daemon and must not report
-    // different network names.
-    res.info.nettype = get_nettype_name(m_core.get_nettype());
     res.info.wide_cumulative_difficulty = m_core.get_blockchain_storage().get_db().get_block_cumulative_difficulty(res.info.height - 1);
     res.info.cumulative_difficulty = (res.info.wide_cumulative_difficulty & 0xffffffffffffffff).convert_to<uint64_t>();
     res.info.block_size_limit = res.info.block_weight_limit = m_core.get_blockchain_storage().get_current_cumulative_block_weight_limit();
@@ -865,27 +730,8 @@ namespace rpc
 
   void DaemonHandler::handle(const GetPeerList::Request& req, GetPeerList::Response& res)
   {
-    // Only the peers of the public zone are reported. That is the source the HTTP
-    // handler uses for its default `public_only = true`, and it is also the only
-    // source this response type can describe: the extra peers `get_peerlist()`
-    // would add live in the anonymity-network zones (Tor, I2P), whose addresses
-    // have no representation in the IPv4-only `peer` struct and would therefore be
-    // filtered out again by append_peerlist(). Note the declared parameter order
-    // is (gray, white).
-    std::vector<nodetool::peerlist_entry> gray_list;
-    std::vector<nodetool::peerlist_entry> white_list;
-    m_p2p.get_public_peerlist(gray_list, white_list);
-
-    const auto is_blocked = [this](const epee::net_utils::network_address& address)
-    {
-      return m_p2p.is_host_blocked(address, nullptr);
-    };
-
-    append_peerlist(is_blocked, white_list, res.white_list);
-    append_peerlist(is_blocked, gray_list, res.gray_list);
-
-    res.status = Message::STATUS_OK;
-    res.error_details = "";
+    res.status = Message::STATUS_FAILED;
+    res.error_details = "RPC method not yet implemented.";
   }
 
   void DaemonHandler::handle(const SetLogHashRate::Request& req, SetLogHashRate::Response& res)
@@ -1000,10 +846,8 @@ namespace rpc
     }
     catch (const std::exception &e)
     {
-      // the exception text names internal symbols and paths: log it, never serve it
-      MERROR("[GetOutputHistogram]: " << e.what());
       res.status = Message::STATUS_FAILED;
-      res.error_details = "Failed to get output histogram";
+      res.error_details = e.what();
       return;
     }
 
@@ -1040,10 +884,8 @@ namespace rpc
     }
     catch (const std::exception& e)
     {
-      // the exception text names internal symbols and paths: log it, never serve it
-      MERROR("[GetOutputKeys]: " << e.what());
       res.status = Message::STATUS_FAILED;
-      res.error_details = "Failed to get output keys";
+      res.error_details = e.what();
       return;
     }
 
@@ -1100,11 +942,9 @@ namespace rpc
     }
     catch (const std::exception& e)
     {
-      // the exception text names internal symbols and paths: log it, never serve it
-      MERROR("[GetOutputDistribution]: " << e.what());
       res.distributions.clear();
       res.status = Message::STATUS_FAILED;
-      res.error_details = "Failed to get output distribution";
+      res.error_details = e.what();
     }
   }
 
@@ -1144,44 +984,40 @@ namespace rpc
     return true;
   }
 
-  /*! Parse one JSON-RPC request, then hand it to `dispatch_request`.
-
-    The envelope is answered separately from what follows it, because the two
-    fail for different reasons and owe the caller different answers. Here
-    nothing is known about the request yet - not even its id - so a failure is
-    answered with the malformed-json status and a null id, exactly as before.
-    Once the envelope has yielded a validated method name and an id, every
-    further failure is `dispatch_request`'s to answer, with that id.
-
-    No payload is logged verbatim at any stage; every caller-controlled value
-    passes through `sanitize_for_log` or is described by its length
-    (CWE-117/CWE-532). */
   epee::byte_slice DaemonHandler::handle(std::string&& request)
   {
-    MDEBUG("Handling RPC request (" << request.size() << " bytes)");
+    if (m_restricted)
+        MDEBUG("Handling RPC request");
+    else
+        MDEBUG("Handling RPC request: " << request);
 
     try
     {
       FullMessage req_full(std::move(request), true);
 
-      // validated at construction: canonical, length-exact, and safe to echo
       const std::string request_type = req_full.getRequestType();
-      const rapidjson::Value& id = req_full.getID();
+      if (m_restricted && is_blocked_in_restricted_mode(request_type))
+      {
+        Message fail;
+        fail.status = Message::STATUS_FAILED;
+        fail.error_details = "\"" + request_type + "\" is not available in restricted mode.";
+        return FullMessage::getResponse(fail, req_full.getID());
+      }
 
-      MDEBUG("Handling RPC request for method \"" << sanitize_for_log(request_type) << "\"");
+      const auto matched_handler = std::lower_bound(std::begin(handlers), std::end(handlers), request_type);
+      if (matched_handler == std::end(handlers) || matched_handler->method_name != request_type)
+        return BAD_REQUEST(request_type, req_full.getID());
 
-      return dispatch_request(*this, m_restricted, request_type, id, req_full.getMessage());
-    }
-    catch (const cryptonote::json::JSON_ERROR& e)
-    {
-      MDEBUG("Rejecting malformed RPC request: " << sanitize_for_log(e.what()));
-      return BAD_JSON(e.what());
+      epee::byte_slice response = matched_handler->call(*this, req_full.getID(), req_full.getMessage());
+
+      const boost::string_ref response_view{reinterpret_cast<const char*>(response.data()), response.size()};
+      MDEBUG("Returning RPC response: " << response_view);
+
+      return response;
     }
     catch (const std::exception& e)
     {
-      MERROR("Failed to parse RPC request: " << e.what());
-      const rapidjson::Value no_id;
-      return INTERNAL_ERROR(no_id);
+      return BAD_JSON(e.what());
     }
   }
 

@@ -95,13 +95,10 @@ namespace
   /**
    * @brief Strict weak ordering over certificate fingerprints
    *
-   * `std::vector::operator<` is specified as `std::lexicographical_compare` over the
-   * contained elements, so this comparator is exactly the ordering the relational
-   * operators provide. Spelling it out keeps the sort in the `ssl_options_t`
-   * fingerprint constructor and the lookup in `ssl_options_t::has_fingerprint` on one
-   * single comparator - the invariant the binary search depends on - and it avoids
-   * instantiating the three-way comparison machinery that `std::vector`'s relational
-   * operators pull in.
+   * Fingerprint vectors are ordered lexicographically by byte. The constructor's sort
+   * and has_fingerprint's binary search must share this comparator; spelling it
+   * explicitly preserves the prior order and avoids instantiating the C++23 vector
+   * three-way comparison path.
    */
   bool fingerprint_less(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b)
   {

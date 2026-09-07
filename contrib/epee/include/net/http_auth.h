@@ -56,7 +56,35 @@ namespace net_utils
       wipeable_string password;
     };
 
-    //! Implements RFC 2617 digest auth. Digests from RFC 7616 can be added.
+    /*! Implements RFC 2617 digest auth. Digests from RFC 7616 can be added.
+
+      \section server_auth_binding What verification binds
+
+      A credential is accepted only when it matches the configured username, the
+      nonce this server last issued and that nonce's use count, the HTTP method
+      of the request, and the request target taken from the request line (the
+      resource check of RFC 2617 section 3.2.2). A credential issued for one
+      target therefore cannot be replayed against another target, and it cannot
+      be replayed against its own target either: a `qop=auth` credential must
+      carry the next expected use count, and a credential without `qop` is
+      accepted only on the first use of the nonce it names.
+
+      \section server_auth_body What verification does not bind
+
+      The entity body is deliberately outside that binding. `qop=auth` is the
+      only mode the challenge advertises, and its A2 digest is computed from the
+      method and the target alone, so one credential stays valid for any body
+      carried by the same method and target. The legacy RFC 2069 form, which
+      carries no `qop` at all, is accepted as well and covers no more than that.
+      A JSON-RPC listener reaches every one of its methods through a single
+      target, which makes the whole method set interchangeable under one
+      accepted credential.
+
+      Digest authentication here therefore proves who the caller is, never what
+      the caller asked for. A listener whose network path is not trusted end to
+      end must be run over TLS, which is what protects the bytes of the request
+      and of the response themselves.
+    */
     class http_server_auth
     {
     public:

@@ -107,9 +107,10 @@ include packages/packages.mk
 # 11) and Clang 17 or newer accept both. Clang 16 is a supported compiler (see
 # docs/COMPILING_DEBUGGING_TESTING.md, "Toolchain requirements"), so emitting the
 # canonical name unconditionally would fail every target C++ package - Boost,
-# ZeroMQ, protobuf - before the first-party build even starts. The canonical name
-# is preferred and the provisional one used only as a fallback, which is also the
-# choice CMake makes for the native build.
+# ZeroMQ, protobuf - before the first-party build even starts. The
+# canonical name is preferred and the provisional one used only as a fallback.
+# CMake's native-build spelling is version- and platform-dependent, but both
+# spellings select C++23.
 #
 # A host compiler that cannot be probed yet, such as a cross toolchain this run
 # has still to unpack, keeps the canonical name. That is the same answer the
@@ -243,16 +244,18 @@ check-packages:
 check-sources:
 	@$(foreach package,$(all_packages),$(call check_or_remove_sources,$(package));)
 
-# Regression check for the target dialect. It asserts that the -std= spelling
-# emitted for this host is a spelling of CXX_STANDARD and one the host compiler
-# accepts and that it selects the dialect asked for, and that the effective
-# dialect is part of the build identity: two dialects must not share a cached
-# archive name, a final_build_id or the final stamp that name them, the same
-# dialect must reproduce all of those, the ids of native packages must not move
-# with the target dialect, and each of those must hold on the Guix path too.
-# It builds nothing, downloads nothing and writes nothing - it re-reads
-# variables and asks the host compiler about one flag - so it is safe to run
-# anywhere, and it takes seconds.
+# Regression check for the target dialect. When the host compiler is runnable,
+# it asserts that the -std= spelling emitted for this host is a spelling of
+# CXX_STANDARD that the compiler accepts and that it selects the dialect asked
+# for. It always asserts that the effective dialect is part of the build
+# identity: two dialects must not share a cached archive name, a final_build_id
+# or the final stamp that name them, the same dialect must reproduce all of
+# those, the ids of native packages must not move with the target dialect, and
+# each of those must hold on the Guix path too.
+# It builds and downloads nothing. If the host compiler is unavailable, the
+# compiler-acceptance check is skipped while the build-identity checks still run.
+# It writes nothing - it re-reads variables and asks the host compiler about one
+# flag - so it is safe to run anywhere, and it takes seconds.
 #
 #   make check-dialect                              this build's host
 #   make check-dialect HOST=x86_64-w64-mingw32      a cross host

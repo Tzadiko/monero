@@ -56,6 +56,27 @@ if (IOS)
     INCLUDE(CmakeLists_IOS.txt)
 endif()
 
+# Compiler detection results are outputs of project(), never inputs to it. A
+# cache entry for one of them - from "-D CMAKE_CXX_COMPILER_ID=..." on the
+# command line, from a hand-edited cache, or from a cache a previous attempt
+# left behind - survives into the project scope and is what the compiler-floor
+# guard further down would read, so an under-floor compiler could be reported
+# as a supported one and configure successfully. Reject such entries before the
+# detection runs. A compiler is chosen with CMAKE_C_COMPILER and
+# CMAKE_CXX_COMPILER, which are genuine inputs, and the floors are additionally
+# checked against the compiler's own predefined macros after project().
+foreach(monero_detection_variable
+    CMAKE_C_COMPILER_ID CMAKE_C_COMPILER_VERSION
+    CMAKE_C_COMPILER_FRONTEND_VARIANT CMAKE_C_SIMULATE_ID
+    CMAKE_C_STANDARD_COMPUTED_DEFAULT CMAKE_C_EXTENSIONS_COMPUTED_DEFAULT
+    CMAKE_CXX_COMPILER_ID CMAKE_CXX_COMPILER_VERSION
+    CMAKE_CXX_COMPILER_FRONTEND_VARIANT CMAKE_CXX_SIMULATE_ID
+    CMAKE_CXX_STANDARD_COMPUTED_DEFAULT CMAKE_CXX_EXTENSIONS_COMPUTED_DEFAULT)
+  if(DEFINED CACHE{${monero_detection_variable}})
+    message(FATAL_ERROR "${monero_detection_variable} is set in the CMake cache, but compiler detection results may only come from CMake's own detection: the compiler-floor guard reads them, so a cached value hides the compiler that actually builds the tree. Remove the entry with \"cmake -U ${monero_detection_variable} -B <build dir>\" (or delete <build dir>/CMakeCache.txt) and select the compiler with CMAKE_C_COMPILER and CMAKE_CXX_COMPILER instead (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+  endif()
+endforeach()
+
 project(monero)
 
 set (COMPILER_CACHE "auto" CACHE STRING "Compiler cache to use: auto, ccache, sccache, or none")
@@ -129,7 +150,7 @@ endif()
 
 enable_language(C ASM)
 
-# Require C11/C++23 and disable extensions for all targets
+# Default first-party targets to C11/C++23 with compiler extensions disabled
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -137,16 +158,41 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Enforce the minimum compiler versions that can build this tree as C++23. The
-# floors live here once; README.md and docs/COMPILING_DEBUGGING_TESTING.md
-# ("Toolchain requirements") mirror them in prose and carry the authoritative
-# matrix of verified compiler/standard-library pairings, which is why every
-# message below points there instead of restating it.
+# The floors below are read from the compiler, so the compiler must not be able
+# to misreport itself. Defining a compiler-identification macro on the command
+# line changes what CMake's own detection reports and what any compile of this
+# tree sees at once, so "-D CMAKE_CXX_FLAGS=-D__GNUC__=14" would otherwise let
+# an under-floor compiler satisfy every check below. No build has a legitimate
+# reason to define or undefine these macros - libstdc++ and libc++ key their
+# own feature tests off them - so reject them in every flag variable that can
+# carry them, including the ones CFLAGS and CXXFLAGS initialise.
+set(monero_identity_macros
+    __GNUC__ __GNUC_MINOR__ __GNUC_PATCHLEVEL__
+    __clang__ __clang_major__ __clang_minor__
+    __apple_build_version__ _MSC_VER _MSC_FULL_VER)
+foreach(monero_flags_variable
+    CMAKE_C_FLAGS CMAKE_CXX_FLAGS
+    CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG
+    CMAKE_C_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELEASE
+    CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO
+    CMAKE_C_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_MINSIZEREL)
+  foreach(monero_identity_macro IN LISTS monero_identity_macros)
+    if("${${monero_flags_variable}}" MATCHES "-[DU] *${monero_identity_macro}")
+      message(FATAL_ERROR "${monero_flags_variable} defines or undefines the compiler-identification macro ${monero_identity_macro}. That macro is what the compiler-floor check reads, and the standard library keys its own feature tests off it, so it may not be overridden. Remove it from the flags (and from CFLAGS or CXXFLAGS in the environment, which initialise these variables) and select the compiler with CMAKE_C_COMPILER and CMAKE_CXX_COMPILER instead (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+    endif()
+  endforeach()
+endforeach()
+
+# Enforce the compiler-family floors accepted for this C++23 tree. README.md
+# mirrors the floors in prose, while docs/COMPILING_DEBUGGING_TESTING.md
+# ("Toolchain requirements") carries the authoritative compatibility matrix
+# and evidence status. Every rejection below points there instead of restating it.
 #
-# Only compiler versions are checked. A standard-library pairing defect (for
-# example Clang 16 against libstdc++ 14) is a header mismatch rather than a
-# version mismatch, fails immediately and self-explanatorily at compile time,
-# and is therefore documented rather than probed here.
+# The guard checks compiler family, frontend variant and version; it does not
+# probe the standard library. A standard-library pairing defect (for example
+# Clang 16 against libstdc++ 14) is a header mismatch rather than a version
+# mismatch, fails immediately and self-explanatorily at compile time, and is
+# therefore documented rather than probed here.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # MinGW-w64 GCC also reports "GNU", so this branch carries the Windows floor.
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0)
@@ -161,11 +207,79 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Clang 16 or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+  # Apple Clang 15 ships with Xcode 15 and is based on LLVM 16, which makes it
+  # the Apple equivalent of the Clang floor. This floor is declared and
+  # enforced here; the evidence behind it, and the pinned-Xcode-15 gate that
+  # would raise it from declared to verified, are recorded in the matrix that
+  # the message below points to.
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15.0)
     message(FATAL_ERROR "Apple Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Apple Clang 15 (Xcode 15) or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+  elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16.0)
+    # Accepting the floor is not the same as having demonstrated it, so say so
+    # here rather than letting this band pass silently.
+    message(NOTICE "Apple Clang ${CMAKE_CXX_COMPILER_VERSION} meets the declared floor, but no Apple Clang 15 build of this tree has been demonstrated: that floor is declared and enforced, not verified. See docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements, for its evidence status and for the 'macOS (Xcode 15 floor)' job that settles it.")
   endif()
 else()
   message(FATAL_ERROR "Unsupported C++ compiler '${CMAKE_CXX_COMPILER_ID}' (version ${CMAKE_CXX_COMPILER_VERSION}); this repository is built as C++23 and requires GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 (Xcode 15) or newer (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+endif()
+
+# The branches above read CMake's detection results. This probe reads the
+# compiler's own predefined macros, by compiling with the compiler that will
+# build the tree, so that the same floors hold even where those results do not
+# describe it: a toolchain file that declares an identity, a driver that
+# reports one version while preprocessing as another, or a cache entry of the
+# kind rejected before project(). The result is cleared first because
+# try_compile keeps it in the cache.
+set(monero_cxx_floor_probe "
+#if defined(_MSC_VER) && !defined(__clang__)
+#  error \"MSVC is unsupported: this repository has no MSVC build path\"
+#elif defined(__clang__) && defined(_MSC_VER)
+#  error \"Clang with the MSVC frontend variant (clang-cl) is unsupported\"
+#elif defined(__apple_build_version__)
+#  if __clang_major__ < 15
+#    error \"Apple Clang 15 (Xcode 15) or newer is required for C++23\"
+#  endif
+#elif defined(__clang__)
+#  if __clang_major__ < 16
+#    error \"Clang 16 or newer is required for C++23\"
+#  endif
+#elif defined(__GNUC__)
+#  if __GNUC__ < 13
+#    error \"GCC 13 or newer is required for C++23\"
+#  endif
+#else
+#  error \"Unsupported compiler: GCC 13, Clang 16 or Apple Clang 15 or newer is required\"
+#endif
+int main() { return 0; }
+")
+# The probe keeps the project's own flags so that a cross build still gets its
+# --target and --sysroot, but with any identification-macro definition stripped
+# in addition to being rejected above, and it runs with NO_CACHE so that the
+# result is written to the normal variable this test reads: a cached result is
+# shadowed by a normal variable of the same name under CMP0126, which a
+# toolchain file could otherwise pre-seed to stand in for a failed probe.
+set(monero_probe_cxx_flags "${CMAKE_CXX_FLAGS}")
+foreach(monero_identity_macro IN LISTS monero_identity_macros)
+  string(REGEX REPLACE "-[DU] *${monero_identity_macro}(=[^ ]*)?" ""
+         monero_probe_cxx_flags "${monero_probe_cxx_flags}")
+endforeach()
+unset(MONERO_CXX_COMPILER_FLOOR_PROBE)
+unset(MONERO_CXX_COMPILER_FLOOR_PROBE CACHE)
+try_compile(MONERO_CXX_COMPILER_FLOOR_PROBE
+  SOURCE_FROM_VAR monero_cxx_compiler_floor_probe.cpp monero_cxx_floor_probe
+  CMAKE_FLAGS "-DCMAKE_CXX_FLAGS=${monero_probe_cxx_flags}"
+  CXX_STANDARD 23
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+  NO_CACHE
+  OUTPUT_VARIABLE monero_cxx_floor_probe_output)
+if(NOT MONERO_CXX_COMPILER_FLOOR_PROBE)
+  string(REGEX MATCHALL "#error [^\n\r]*" monero_cxx_floor_probe_errors "${monero_cxx_floor_probe_output}")
+  if(monero_cxx_floor_probe_errors)
+    list(GET monero_cxx_floor_probe_errors 0 monero_cxx_floor_probe_reason)
+    message(FATAL_ERROR "${CMAKE_CXX_COMPILER} does not meet the C++23 compiler floors: ${monero_cxx_floor_probe_reason} (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+  endif()
+  message(FATAL_ERROR "The C++23 compiler-floor probe did not compile with ${CMAKE_CXX_COMPILER}, so the floors could not be verified (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements). Compiler output:\n${monero_cxx_floor_probe_output}")
 endif()
 
 function (add_c_flag_if_supported flag var)

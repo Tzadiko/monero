@@ -25,9 +25,13 @@
 // 
 
 
+#include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/regex.hpp>
+#include <boost/utility/string_ref.hpp>
+#include <cstddef>
+#include <string>
 #include "http_protocol_handler.h"
 #include "string_tools.h"
 #include "string_tools_lexical.h"
@@ -48,6 +52,137 @@ namespace net_utils
 {
 	namespace http
 	{
+		namespace detail
+		{
+			/*! Number of source bytes `escape_for_log` renders before it stops.
+			  Escaping expands the rendered text - one source byte can become
+			  four characters - so this constant bounds the number of source
+			  bytes processed, not the length of the returned string. */
+			constexpr const std::size_t max_logged_value_bytes = 96;
+
+			/*! Number of header fields `summarize_header_block` describes
+			  before it stops and reports how many were left out. */
+			constexpr const std::size_t max_logged_header_fields = 32;
+
+			/*! \return `src` rendered so that it is safe to write to a log:
+			  printable ASCII (0x20..0x7E) is kept as-is, with a backslash
+			  doubled so the rendering is unambiguous, and every other byte -
+			  CR, LF, TAB, any other control byte and every non-ASCII byte - is
+			  rendered as `\xHH` in lower-case hex. A client can therefore not
+			  forge a log record with an embedded line break (CWE-117). At most
+			  `max_logged_value_bytes` source bytes are rendered; when `src` is
+			  longer the rendering stops there and a truncation marker states
+			  the original byte length. */
+			inline std::string escape_for_log(const boost::string_ref src)
+			{
+				static constexpr const char hex_digits[] = "0123456789abcdef";
+
+				const std::size_t bounded = std::min(src.size(), max_logged_value_bytes);
+
+				std::string out{};
+				out.reserve(bounded + 32);
+				for(std::size_t i = 0; i < bounded; ++i)
+				{
+					const unsigned char value = static_cast<unsigned char>(src[i]);
+					if(value == '\\')
+						out += "\\\\";
+					else if(0x20 <= value && value <= 0x7E)
+						out.push_back(static_cast<char>(value));
+					else
+					{
+						out += "\\x";
+						out.push_back(hex_digits[value >> 4]);
+						out.push_back(hex_digits[value & 0x0F]);
+					}
+				}
+
+				if(bounded < src.size())
+				{
+					out += "...[truncated, ";
+					out += std::to_string(src.size());
+					out += " bytes total]";
+				}
+				return out;
+			}
+
+			/*! \return A description of the header fields in `block`, which is
+			  split on '\n' with a trailing '\r' dropped from each line. Every
+			  non-empty field contributes its escaped field name and the byte
+			  length of its value, and never any part of the value itself, so
+			  credential material carried by `Authorization`,
+			  `Proxy-Authorization`, `Cookie` or a challenge field cannot reach
+			  the log (CWE-532). This applies to every field rather than to a
+			  list of sensitive names, so no field is missed. A line with no
+			  ':' has no field name and is described as an unnamed malformed
+			  field with its length. At most `max_logged_header_fields` fields
+			  are described; the number of fields left out is stated. */
+			inline std::string summarize_header_block(const boost::string_ref block)
+			{
+				std::string out{};
+				std::size_t described = 0;
+				std::size_t omitted = 0;
+
+				boost::string_ref rest = block;
+				while(!rest.empty())
+				{
+					const std::size_t line_end = rest.find('\n');
+					boost::string_ref line = (line_end == boost::string_ref::npos) ?
+						rest : rest.substr(0, line_end);
+					rest = (line_end == boost::string_ref::npos) ?
+						boost::string_ref{} : rest.substr(line_end + 1);
+
+					if(!line.empty() && line.back() == '\r')
+						line.remove_suffix(1);
+					if(line.empty())
+						continue; // end of the field block, or an empty line within it
+
+					if(described == max_logged_header_fields)
+					{
+						++omitted;
+						continue;
+					}
+
+					if(!out.empty())
+						out += ", ";
+
+					const std::size_t colon = line.find(':');
+					if(colon == boost::string_ref::npos || colon == 0)
+					{
+						out += "<malformed field> (";
+						out += std::to_string(line.size());
+						out += " bytes)";
+					}
+					else
+					{
+						// The reported length is the length of the field value
+						// itself, with the optional whitespace around it
+						// removed, matching what `detail::parse_header_line`
+						// stores for the field.
+						boost::string_ref value = line.substr(colon + 1);
+						while(!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+							value.remove_prefix(1);
+						while(!value.empty() && (value.back() == ' ' || value.back() == '\t'))
+							value.remove_suffix(1);
+
+						out += escape_for_log(line.substr(0, colon));
+						out += " (";
+						out += std::to_string(value.size());
+						out += " byte value)";
+					}
+					++described;
+				}
+
+				if(out.empty())
+					out = "<no fields>";
+				if(omitted)
+				{
+					out += ", ...[";
+					out += std::to_string(omitted);
+					out += " more fields]";
+				}
+				return out;
+			}
+		}
 
 		struct multipart_entry
 		{
@@ -101,7 +236,9 @@ namespace net_utils
 					entry.m_etc_header_fields.push_back(std::pair<std::string, std::string>(result[field_etc_name], result[field_val]));
 				else
 				{
-					LOG_ERROR("simple_http_connection_handler::parse_header() not matched last entry in:"<<std::string(it_current_bound, it_end));
+					// Field names and value lengths only - this fragment is a raw
+					// header block and can carry an "Authorization" line.
+					LOG_ERROR("simple_http_connection_handler::parse_header() not matched last entry in: "<<detail::summarize_header_block(std::string(it_current_bound, it_end)));
 				}
 
 				it_current_bound = result[(int)result.size()-1].first;
@@ -122,7 +259,8 @@ namespace net_utils
 
 			if(!parse_header(it_begin, end_header_it+4, entry))
 			{
-				LOG_ERROR("Failed to parse header:" << std::string(it_begin, end_header_it+2));
+				// Field names and value lengths only, for the same reason.
+				LOG_ERROR("Failed to parse header: " << detail::summarize_header_block(std::string(it_begin, end_header_it+2)));
 				return false;
 			}
 		
@@ -139,7 +277,8 @@ namespace net_utils
 			std::string boundary;
 			if(!match_boundary(content_type, boundary))
 			{
-				MERROR("Failed to match boundary in content type: " << content_type);
+				// Single untrusted field value: escaped and bounded.
+				MERROR("Failed to match boundary in content type: " << detail::escape_for_log(content_type));
 				return false;
 			}
 			
@@ -430,7 +569,11 @@ namespace net_utils
 		}else
 		{
 			m_state = http_state_error;
-			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::handle_invoke_query_line(): Failed to match first line: " << m_cache);
+			// The request line failed to match, so where the header fields begin
+			// is unknown; cutting at the first '\n' is what guarantees that no
+			// field value - an "Authorization" line above all - can be reached.
+			const std::string::size_type first_line_end = m_cache.find('\n');
+			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::handle_invoke_query_line(): Failed to match first line: " << detail::escape_for_log(boost::string_ref(m_cache.data(), first_line_end == std::string::npos ? m_cache.size() : first_line_end)));
 			return false;
 		}
 
@@ -454,14 +597,19 @@ namespace net_utils
   template<class t_connection_context>
 	bool simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(size_t pos)
 	{ 
-		LOG_PRINT_L3("HTTP HEAD:\r\n" << m_cache.substr(0, pos));
+		// This runs before authentication, so the raw block must never be logged:
+		// a Digest "Authorization" field would disclose the username, nonce,
+		// cnonce, nonce count, uri and response verifier (CWE-532). Field names
+		// and value lengths carry the diagnostic value without the credential.
+		const boost::string_ref header_block(m_cache.data(), std::min(pos, m_cache.size()));
+		LOG_PRINT_L3("HTTP HEAD: " << detail::summarize_header_block(header_block));
 
 		m_query_info.m_full_request_buf_size = pos;
     m_query_info.m_request_head.assign(m_cache.begin(), m_cache.begin()+pos); 
 
 		if(!parse_cached_header(m_query_info.m_header_info, m_cache, pos))
 		{
-			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(): failed to anilize request header: " << m_cache);
+			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(): failed to anilize request header: " << detail::summarize_header_block(header_block));
 			m_state = http_state_error;
 			return false;
 		}
@@ -477,7 +625,8 @@ namespace net_utils
 			m_body_transfer_type = http_body_transfer_measure;
 			if(!get_len_from_content_lenght(m_query_info.m_header_info.m_content_length, m_len_summary))
 			{
-				LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(): Failed to get_len_from_content_lenght();, m_query_info.m_content_length="<<m_query_info.m_header_info.m_content_length);
+				// Single untrusted field value: escaped and bounded.
+				LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(): Failed to get_len_from_content_lenght();, m_query_info.m_content_length="<<detail::escape_for_log(m_query_info.m_header_info.m_content_length));
 				m_state = http_state_error;
 				return false;
 			}
@@ -631,7 +780,19 @@ namespace net_utils
 		std::string response_data = get_response_header(response);
 		//LOG_PRINT_L0("HTTP_SEND: << \r\n" << response_data + response.m_body);
 
-		LOG_PRINT_L3("HTTP_RESPONSE_HEAD: << \r\n" << response_data);
+		// Never the full response header text: it carries the WWW-Authenticate
+		// challenge and the reflected Access-Control-Allow-Origin. The status
+		// line plus field names and value lengths is what gets logged.
+		{
+			const std::string::size_type status_end = response_data.find_first_of("\r\n");
+			const boost::string_ref status_line(
+				response_data.data(), status_end == std::string::npos ? response_data.size() : status_end
+			);
+			const boost::string_ref response_fields = (status_end == std::string::npos) ?
+				boost::string_ref{} :
+				boost::string_ref(response_data.data() + status_end, response_data.size() - status_end);
+			LOG_PRINT_L3("HTTP_RESPONSE_HEAD: " << detail::escape_for_log(status_line) << " fields: " << detail::summarize_header_block(response_fields));
+		}
 
 		if ((response.m_body.size() && (query_info.m_http_method != http::http_method_head)) || (query_info.m_http_method == http::http_method_options))
 			response_data += response.m_body;
@@ -655,7 +816,9 @@ namespace net_utils
 		m_config.m_lock.unlock();
 		if(!file_io_utils::load_file_to_string(destination_file_path.c_str(), response.m_body))
 		{
-			MWARNING("URI \""<< query_info.m_full_request_str.substr(0, query_info.m_full_request_str.size()-2) << "\" [" << destination_file_path << "] Not Found (404 )");
+			// The request line is untrusted and unbounded (up to HTTP_MAX_URI_LEN),
+			// and so is the path derived from it; both are escaped and bounded.
+			MWARNING("URI \""<< detail::escape_for_log(query_info.m_full_request_str.substr(0, query_info.m_full_request_str.size()-2)) << "\" [" << detail::escape_for_log(destination_file_path) << "] Not Found (404 )");
 			response.m_body = get_not_found_response_body(query_info.m_URI);
 			response.m_response_code = 404;
 			response.m_response_comment = "Not found";
@@ -663,7 +826,7 @@ namespace net_utils
 			return true;
 		}
 
-		MDEBUG(" -->> " << query_info.m_full_request_str << "\r\n<<--OK");
+		MDEBUG(" -->> " << detail::escape_for_log(query_info.m_full_request_str) << "\r\n<<--OK");
 		response.m_response_code = 200;
 		response.m_response_comment = "OK";
 		response.m_mime_tipe = get_file_mime_tipe(uri_to_path);
@@ -674,9 +837,11 @@ namespace net_utils
   template<class t_connection_context>
 	std::string simple_http_connection_handler<t_connection_context>::get_response_header(const http_response_info& response)
 	{
+		// No framework or product token is emitted in any response, including the
+		// unauthenticated 401 and parser/error responses, so that none of them
+		// discloses the server implementation (CWE-200). Do not add one back.
 		std::string buf = "HTTP/1.1 ";
 		buf += boost::lexical_cast<std::string>(response.m_response_code) + " " + response.m_response_comment + "\r\n" +
-			"Server: Epee-based\r\n"
 			"Content-Length: ";
 		buf += boost::lexical_cast<std::string>(response.m_body.size()) + "\r\n";
 

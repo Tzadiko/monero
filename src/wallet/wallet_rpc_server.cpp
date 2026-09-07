@@ -32,9 +32,11 @@
 #include <boost/filesystem/operations.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/preprocessor/stringize.hpp>
+#include <algorithm>
 #include <cstdint>
 #include <chrono>
 #include <cstring>
+#include <string>
 #include <thread>
 
 #include "version.h"
@@ -150,6 +152,48 @@ namespace
   const command_line::arg_descriptor<std::size_t> arg_rpc_response_soft_limit = {"rpc-response-soft-limit", "Max response bytes that can be queued, enforced at next response attempt", DEFAULT_RPC_SOFT_LIMIT_SIZE};
 
   constexpr const char default_rpc_username[] = "monero";
+
+  /*! Number of source bytes of exception text that `escape_for_log` renders before it
+    stops. Escaping expands the rendered text - one source byte can become four
+    characters - so this bounds the source consumed, not the length of the log line. */
+  constexpr const std::size_t max_logged_exception_bytes = 512;
+
+  /*! \return `src` rendered so that it is safe to write to a single log record:
+    printable ASCII (0x20..0x7E) is kept as-is, with a backslash doubled so the
+    rendering is unambiguous, and every other byte - CR, LF, TAB, any other control
+    byte and every non-ASCII byte - is rendered as `\xHH` in lower-case hex. Exception
+    text routinely embeds request-supplied values such as file names, labels and
+    addresses, so without this a caller could forge a log record (CWE-117). At most
+    `max_logged_exception_bytes` source bytes are rendered; a longer input is marked
+    with its original byte length. */
+  std::string escape_for_log(const std::string &src)
+  {
+    static constexpr const char hex_digits[] = "0123456789abcdef";
+
+    const std::size_t bounded = std::min(src.size(), max_logged_exception_bytes);
+
+    std::string out{};
+    out.reserve(bounded + 32);
+    for (std::size_t i = 0; i < bounded; ++i)
+    {
+      const unsigned char value = static_cast<unsigned char>(src[i]);
+      if (value == '\\')
+        out += "\\\\";
+      else if (0x20 <= value && value <= 0x7E)
+        out.push_back(static_cast<char>(value));
+      else
+      {
+        out += "\\x";
+        out.push_back(hex_digits[value >> 4]);
+        out.push_back(hex_digits[value & 0x0F]);
+      }
+    }
+
+    if (bounded < src.size())
+      out += "...[truncated, " + std::to_string(src.size()) + " bytes total]";
+
+    return out;
+  }
 
   boost::optional<tools::password_container> password_prompter(const char *prompt, bool verify)
   {
@@ -1437,7 +1481,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_SIGN_UNSIGNED;
-      er.message = std::string("Failed to sign unsigned tx: ") + e.what();
+      er.message = handled_error(e, "Failed to sign unsigned tx.");
       return false;
     }
 
@@ -1514,7 +1558,7 @@ namespace tools
       }
       catch (const std::exception &e) {
         er.code = WALLET_RPC_ERROR_CODE_BAD_UNSIGNED_TX_DATA;
-        er.message = "failed to parse unsigned transfers: " + std::string(e.what());
+        er.message = handled_error(e, "Failed to parse unsigned transfers.");
         return false;
       }
     } else if (!req.multisig_txset.empty()) {
@@ -1539,7 +1583,7 @@ namespace tools
       }
       catch (const std::exception &e) {
         er.code = WALLET_RPC_ERROR_CODE_BAD_MULTISIG_TX_DATA;
-        er.message = "failed to parse multisig transfers: " + std::string(e.what());
+        er.message = handled_error(e, "Failed to parse multisig transfers.");
         return false;
       }
     }
@@ -1732,7 +1776,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_BAD_SIGNED_TX_DATA;
-      er.message = std::string("Failed to parse signed tx: ") + e.what();
+      er.message = handled_error(e, "Failed to parse signed tx.");
       return false;
     }
 
@@ -1747,7 +1791,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_SIGNED_SUBMISSION;
-      er.message = std::string("Failed to submit signed tx: ") + e.what();
+      er.message = handled_error(e, "Failed to submit signed tx.");
       return false;
     }
 
@@ -2744,7 +2788,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to check tx key.");
       return false;
     }
     return true;
@@ -2778,7 +2822,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to get tx proof.");
       return false;
     }
     return true;
@@ -2811,7 +2855,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to check tx proof.");
       return false;
     }
     return true;
@@ -2837,7 +2881,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to get spend proof.");
       return false;
     }
     return true;
@@ -2862,7 +2906,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to check spend proof.");
       return false;
     }
     return true;
@@ -2892,7 +2936,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to get reserve proof.");
       return false;
     }
     return true;
@@ -2923,7 +2967,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to check reserve proof.");
       return false;
     }
     return true;
@@ -3491,7 +3535,7 @@ namespace tools
           m_wallet->scan_tx(txids);
       }  catch (const tools::error::wont_reprocess_recent_txs_via_untrusted_daemon &e) {
           er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-          er.message = e.what() + std::string(". Either connect to a trusted daemon or rescan the chain.");
+          er.message = handled_error(e, "Failed to scan tx. Either connect to a trusted daemon or rescan the chain.");
           return false;
       } catch (const std::exception &e) {
           handle_rpc_exception(std::current_exception(), er, WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR);
@@ -3815,6 +3859,16 @@ namespace tools
     return true;
   }
   //------------------------------------------------------------------------------------------------------------------------------
+  std::string wallet_rpc_server::handled_error(const std::exception &e, const char *public_message)
+  {
+    // The exception text is for the operator, not the caller: it can name internal paths, library
+    // symbols and wallet state. Log it at the level this file already uses for exception detail -
+    // bounded and escaped, because parts of that text arrive from the request - and hand back only
+    // the stable public wording.
+    MERROR(public_message << " " << escape_for_log(e.what()));
+    return std::string(public_message);
+  }
+  //------------------------------------------------------------------------------------------------------------------------------
   void wallet_rpc_server::handle_rpc_exception(const std::exception_ptr& e, epee::json_rpc::error& er, int default_error_code) {
     try
     {
@@ -3886,13 +3940,30 @@ namespace tools
     }
     catch (const error::signature_check_failed& e)
     {
+        // Unlike the curated messages above, this type's what() is composed at the throw site
+        // from the input index and count, the key image, the signature and the wallet public
+        // key (src/wallet/wallet2.cpp, the only site that throws it), so it describes wallet
+        // state and not the caller's request.
         er.code = WALLET_RPC_ERROR_CODE_WRONG_SIGNATURE;
-        er.message = e.what();
+        er.message = handled_error(e, "Signature check failed.");
+    }
+    catch (const error::imported_outputs_omit_known_outputs& e)
+    {
+      // A recoverable condition of the piecemeal export_outputs/import_outputs protocol rather
+      // than a server-internal fault: the caller asked to import a range of outputs that starts
+      // past the ones this wallet holds, and it recovers by retrying from an earlier range. Its
+      // what() is a fixed literal chosen at the throw site with no wallet state in it, so it is
+      // served as-is like the other curated messages above - withholding it would leave a caller
+      // walking output ranges unable to tell this apart from a real failure.
+      er.code = default_error_code;
+      er.message = e.what();
     }
     catch (const std::exception& e)
     {
+      // Anything not matched above is a standard-library, filesystem, parser or internal wallet
+      // failure whose text describes server internals; the detail is logged, never served.
       er.code = default_error_code;
-      er.message = e.what();
+      er.message = handled_error(e, "The request could not be completed. See the wallet log for details.");
     }
     catch (...)
     {
@@ -4388,7 +4459,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to make multisig.");
       return false;
     }
 
@@ -4428,7 +4499,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = e.what();
+      er.message = handled_error(e, "Failed to export multisig info.");
       return false;
     }
 
@@ -4488,7 +4559,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = std::string{"Error calling import_multisig: "} + e.what();
+      er.message = handled_error(e, "Error calling import_multisig.");
       return false;
     }
 
@@ -4502,7 +4573,7 @@ namespace tools
         }
         catch (const std::exception &e)
         {
-          er.message = std::string("Success, but failed to update spent status after import multisig info: ") + e.what();
+          er.message = handled_error(e, "Success, but failed to update spent status after importing multisig info.");
         }
       }
       else
@@ -4552,7 +4623,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = std::string("Error calling exchange_multisig_info: ") + e.what();
+      er.message = handled_error(e, "Error calling exchange_multisig_info.");
       return false;
     }
     return true;
@@ -4593,7 +4664,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = std::string("Error calling exchange_multisig_info_booster: ") + e.what();
+      er.message = handled_error(e, "Error calling exchange_multisig_info_booster.");
       return false;
     }
     return true;
@@ -4655,7 +4726,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_MULTISIG_SIGNATURE;
-      er.message = std::string("Failed to sign multisig tx: ") + e.what();
+      er.message = handled_error(e, "Failed to sign multisig tx.");
       return false;
     }
 
@@ -4729,7 +4800,7 @@ namespace tools
     catch (const std::exception &e)
     {
       er.code = WALLET_RPC_ERROR_CODE_MULTISIG_SUBMISSION;
-      er.message = std::string("Failed to submit multisig tx: ") + e.what();
+      er.message = handled_error(e, "Failed to submit multisig tx.");
       return false;
     }
 

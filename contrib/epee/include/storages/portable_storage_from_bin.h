@@ -28,6 +28,8 @@
 
 #pragma once 
 
+#include <limits>
+#include <string>
 #include <type_traits>
 
 #include "misc_log_ex.h"
@@ -65,6 +67,72 @@ namespace epee
     template<> struct ps_min_bytes<section> { static constexpr const size_t strict = 1; };
     template<> struct ps_min_bytes<array_entry> { static constexpr const size_t strict = 1; };
 
+    /*! \brief Renders untrusted portable-storage bytes for a diagnostic message.
+
+      Section names are read straight from the buffer, so a rejection message that
+      quoted one verbatim would put remote bytes into the log and into the text of
+      the thrown exception. Bytes such as CR, LF or ESC let a peer forge log
+      records or drive a terminal that is displaying the log (CWE-117), so every
+      byte outside printable ASCII becomes a `\xHH` escape, the escape character
+      and the quote are themselves escaped, and the rendering is capped: a name may
+      be up to 255 bytes and no diagnostic needs all of them.
+
+      \param src bytes exactly as they were read from the buffer.
+      \param max_bytes number of leading bytes of \p src to render.
+      \return Printable 7-bit ASCII text, with the original byte count appended
+        when \p src was longer than \p max_bytes.
+    */
+    inline std::string escape_bytes_for_log(const std::string& src, const size_t max_bytes = 48)
+    {
+      static constexpr const char hex_digits[] = "0123456789abcdef";
+      const size_t rendered = src.size() < max_bytes ? src.size() : max_bytes;
+      std::string out;
+      out.reserve(rendered + 32);
+      for (size_t i = 0; i < rendered; ++i)
+      {
+        const unsigned char byte = static_cast<unsigned char>(src[i]);
+        if (byte == '\\' || byte == '"')
+        {
+          out.push_back('\\');
+          out.push_back(static_cast<char>(byte));
+        }
+        else if (byte < 0x20 || 0x7e < byte)
+        {
+          const char escaped[] = {'\\', 'x', hex_digits[byte >> 4], hex_digits[byte & 0x0f]};
+          out.append(escaped, sizeof(escaped));
+        }
+        else
+          out.push_back(static_cast<char>(byte));
+      }
+      if (rendered != src.size())
+        out += "... (" + std::to_string(src.size()) + " bytes)";
+      return out;
+    }
+
+    /*! \brief Converts a size decoded from the buffer to a narrower unsigned type,
+      rejecting values that type cannot represent.
+
+      Sizes travel on the wire as 64 bit values, while every bound the reader
+      enforces afterwards - remaining buffer, object, field and string limits, and
+      MAX_STRING_LEN_POSSIBLE - is expressed in `size_t`. Where `size_t` is
+      narrower than 64 bits, as on the supported i686 and 32 bit Android targets,
+      an oversized encoded size would wrap on conversion and the malformed count
+      could then satisfy the very checks the true value fails
+      (CWE-681/CWE-190). The value is rejected here instead, before any narrowing
+      happens. Where `size_t` spans 64 bits the check cannot fire and the
+      conversion is the identity, so those targets parse exactly as before.
+
+      \throw std::runtime_error When \p value is not representable as \p t_size_type.
+      \return \p value converted to \p t_size_type.
+    */
+    template<class t_size_type>
+    t_size_type checked_size_cast(const uint64_t value)
+    {
+      static_assert(std::is_unsigned<t_size_type>::value, "unsigned target type expected");
+      CHECK_AND_ASSERT_THROW_MES(value <= static_cast<uint64_t>(std::numeric_limits<t_size_type>::max()), "size value " << value << " exceeds the " << (sizeof(t_size_type) * 8) << " bit addressable range of this platform");
+      return static_cast<t_size_type>(value);
+    }
+
     struct throwable_buffer_reader
     {
       throwable_buffer_reader(const void* ptr, size_t sz);
@@ -85,6 +153,10 @@ namespace epee
       void read(std::string& str);
       void read(array_entry &ae);
       void set_limits(size_t objects, size_t fields, size_t strings);
+      //! \return Number of source bytes that have not been consumed yet.
+      size_t remaining() const noexcept;
+      //! \return True when every source byte that has not been consumed is zero.
+      bool remaining_is_zeroed() const noexcept;
     private:
       struct recursuion_limitation_guard
       {
@@ -160,14 +232,17 @@ namespace epee
     }
     
     template<>
-    void throwable_buffer_reader::read<bool>(bool& pod_val)
+    inline void throwable_buffer_reader::read<bool>(bool& pod_val)
     {
       RECURSION_LIMITATION();
       static_assert(std::is_standard_layout<bool>::value && std::is_trivial<bool>::value, "POD type expected");
       static_assert(sizeof(bool) == sizeof(uint8_t), "We really shouldn't use bool directly in serialization code. Replace it with uint8_t if this assert triggers!");
       uint8_t t;
       read(&t, sizeof(t));
-      CHECK_AND_ASSERT_THROW_MES(t <= 1, "Invalid bool value " << t);
+      // the rejected byte is rendered as a number, never streamed as a character:
+      // it comes from the buffer and a control byte in a log record is an
+      // injection vector, not a diagnostic
+      CHECK_AND_ASSERT_THROW_MES(t <= 1, "Invalid bool value " << static_cast<int>(t));
       pod_val = (t != 0);
     }
     
@@ -238,7 +313,10 @@ namespace epee
     {
       RECURSION_LIMITATION();
       CHECK_AND_ASSERT_THROW_MES(m_count >= 1, "empty buff, expected place for varint");
-      size_t v = 0;
+      // decoded and shifted at the width it is encoded in: narrowing to size_t
+      // before the shift would truncate an oversized value where size_t is 32 bit
+      // and hand a small, plausible count to every check that follows
+      uint64_t v = 0;
       uint8_t size_mask = (*(uint8_t*)m_ptr) &PORTABLE_RAW_SIZE_MARK_MASK;
       switch (size_mask)
       {
@@ -247,10 +325,10 @@ namespace epee
       case PORTABLE_RAW_SIZE_MARK_DWORD: v = read<uint32_t>();break;
       case PORTABLE_RAW_SIZE_MARK_INT64: v = read<uint64_t>();break;
       default:
-        CHECK_AND_ASSERT_THROW_MES(false, "unknown varint size_mask = " << size_mask);
+        CHECK_AND_ASSERT_THROW_MES(false, "unknown varint size_mask = " << static_cast<int>(size_mask));
       }
       v >>= 2;
-      return v;
+      return checked_size_cast<size_t>(v);
     }
 
     template<class t_type>
@@ -338,7 +416,9 @@ namespace epee
         std::string sec_name;
         read_sec_name(sec_name);
         const auto insert_loc = sec.m_entries.lower_bound(sec_name);
-        CHECK_AND_ASSERT_THROW_MES(insert_loc == sec.m_entries.end() || insert_loc->first != sec_name, "duplicate key: " << sec_name);
+        // the name is remote input, so it is escaped and capped before it reaches
+        // the log or the exception text; the rejection itself is unchanged
+        CHECK_AND_ASSERT_THROW_MES(insert_loc == sec.m_entries.end() || insert_loc->first != sec_name, "duplicate key: \"" << escape_bytes_for_log(sec_name) << "\"");
         sec.m_entries.emplace_hint(insert_loc, std::move(sec_name), load_storage_entry());
       }
     }
@@ -366,6 +446,21 @@ namespace epee
       max_objects = objects;
       max_fields = fields;
       max_strings = strings;
+    }
+    inline
+    size_t throwable_buffer_reader::remaining() const noexcept
+    {
+      return m_count;
+    }
+    inline
+    bool throwable_buffer_reader::remaining_is_zeroed() const noexcept
+    {
+      for(size_t i = 0; i < m_count; ++i)
+      {
+        if(m_ptr[i])
+          return false;
+      }
+      return true;
     }
   }
 }

@@ -28,7 +28,6 @@
 
 #pragma once
 
-#include <cstddef>
 #include <rapidjson/document.h>
 #include <rapidjson/writer.h>
 #include <string>
@@ -72,42 +71,10 @@ namespace rpc
   class FullMessage
   {
     public:
-      //! Only JSON-RPC 2.0 envelopes are accepted; the `jsonrpc` member must equal this exactly.
-      static constexpr char JSONRPC_VERSION[] = "2.0";
-
-      /*! Longest accepted `method` value. The longest method this daemon
-        registers is 28 characters (`get_tx_global_output_indices`); the bound
-        exists so that an unbounded attacker-supplied name can never be copied
-        into an error response or a log line. */
-      static constexpr std::size_t MAX_METHOD_LENGTH = 64;
-
       ~FullMessage() { }
 
-      /*! Parse and validate a JSON-RPC envelope.
-
-        Throws a `cryptonote::json::JSON_ERROR` unless the document is an object
-        whose `jsonrpc` member is the string `JSONRPC_VERSION`. When `request`
-        is set, `method` must additionally be a canonical method name - see
-        `getRequestType()` - `params` must be present, and `id`, if present,
-        must be a string, a number or null. Otherwise the envelope must carry a
-        `result` or an `error` member.
-
-        \throw cryptonote::json::PARSE_FAIL if the text is not a JSON object.
-        \throw cryptonote::json::MISSING_KEY if a required member is absent.
-        \throw cryptonote::json::WRONG_TYPE if a member has the wrong type, the
-          protocol version is not `JSONRPC_VERSION`, or `method` is not
-          canonical. */
       FullMessage(std::string&& json_string, bool request=false);
 
-      /*! \return The `method` member, exactly as many bytes long as the JSON
-        string it came from.
-
-        The value is validated at construction: it is non-empty, at most
-        `MAX_METHOD_LENGTH` bytes, and composed only of `[A-Za-z0-9_.-]`. An
-        embedded NUL - which would otherwise truncate the name and let a
-        non-canonical request dispatch as a shorter registered method - is
-        therefore rejected before this value can reach method lookup, as are
-        control characters and any byte outside that set. */
       std::string getRequestType() const;
 
       const rapidjson::Value& getMessage() const;
@@ -138,25 +105,7 @@ namespace rpc
   epee::byte_slice BAD_REQUEST(const std::string& request);
   epee::byte_slice BAD_REQUEST(const std::string& request, const rapidjson::Value& id);
 
-  //! \return A `Malformed json` response with a null id, for a request whose envelope did not parse.
   epee::byte_slice BAD_JSON(const std::string& error_details);
-
-  /*! \return A `Malformed json` response for `id`, for a request whose envelope
-    parsed but whose parameters did not. Echoing the id back is required by
-    JSON-RPC 2.0 whenever the id is known, and it is what lets a client
-    correlate the failure with the request it sent. */
-  epee::byte_slice BAD_JSON(const std::string& error_details, const rapidjson::Value& id);
-
-  /*! \return A failure response for `id` carrying a fixed, non-disclosing
-    message.
-
-    Used when a request was well-formed and mapped to a handler but the handler
-    or the response serializer threw. The exception text is deliberately not
-    forwarded: it originates in the storage backend, the standard library or a
-    third-party library and would disclose internal function names, type names
-    and filesystem paths to any client, including one restricted to public
-    methods (CWE-209). Callers log the exception text instead. */
-  epee::byte_slice INTERNAL_ERROR(const rapidjson::Value& id);
 
   epee::byte_slice REQUEST_TOO_LARGE();
 

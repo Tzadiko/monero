@@ -14097,7 +14097,7 @@ size_t wallet2::import_outputs(const std::tuple<uint64_t, uint64_t, std::vector<
   const size_t num_outputs = std::get<1>(outputs);
   const std::vector<tools::wallet2::transfer_details> &output_array = std::get<2>(outputs);
 
-  THROW_WALLET_EXCEPTION_IF(offset > m_transfers.size(), error::wallet_internal_error,
+  THROW_WALLET_EXCEPTION_IF(offset > m_transfers.size(), error::imported_outputs_omit_known_outputs,
       "Imported outputs omit more outputs that we know of");
 
   THROW_WALLET_EXCEPTION_IF(offset + output_array.size() > num_outputs, error::wallet_internal_error,
@@ -14177,7 +14177,7 @@ size_t wallet2::import_outputs(const std::tuple<uint64_t, uint64_t, std::vector<
   const size_t num_outputs = std::get<1>(outputs);
   const std::vector<tools::wallet2::exported_transfer_details> &output_array = std::get<2>(outputs);
 
-  THROW_WALLET_EXCEPTION_IF(offset > m_transfers.size(), error::wallet_internal_error,
+  THROW_WALLET_EXCEPTION_IF(offset > m_transfers.size(), error::imported_outputs_omit_known_outputs,
       "Imported outputs omit more outputs that we know of. Try using export_outputs all.");
 
   THROW_WALLET_EXCEPTION_IF(offset + output_array.size() > num_outputs, error::wallet_internal_error,
@@ -14338,6 +14338,14 @@ size_t wallet2::import_outputs_from_str(const std::string &outputs_st)
     }
 
     imported_outputs = !std::get<2>(new_outputs).empty() ? import_outputs(new_outputs) : !std::get<2>(outputs).empty() ? import_outputs(outputs) : 0;
+  }
+  catch (const error::imported_outputs_omit_known_outputs &e)
+  {
+    // Keep the recoverable "the range starts past what we hold" condition distinguishable from a
+    // genuine internal failure: re-wrapping it as a plain wallet_internal_error would hide it
+    // behind the same type as an unexpected fault, and a caller walking output ranges needs to
+    // tell the two apart. The composed text stays fixed-literal only.
+    THROW_WALLET_EXCEPTION(error::imported_outputs_omit_known_outputs, std::string("Failed to import outputs: ") + e.what());
   }
   catch (const std::exception &e)
   {

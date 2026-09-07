@@ -114,32 +114,6 @@ namespace
     }
     convert_numeric(val.GetUint64(), i);
   }
-
-  /*! Read `key` from `val` into `dest` only when the member is present.
-
-    `GET_FROM_JSON_OBJECT` expands `OBJECT_HAS_MEMBER_OR_THROW` and throws
-    `MISSING_KEY` for an absent member. That is correct for every key the
-    daemon has always written, but it cannot be used for a key that is newly
-    written: `DAEMON_RPC_VERSION_ZMQ` is frozen at 2.0, so a payload produced
-    by an older daemon simply does not carry such a key, and a required read
-    would make an updated consumer reject that otherwise valid payload. Keys
-    added to a response after 2.0 are therefore read through this helper, which
-    leaves `dest` at the value the caller initialized it to when the member is
-    absent. A member that *is* present is validated exactly as a required read
-    would validate it - `fromJsonValue` still throws `WRONG_TYPE` on a type
-    mismatch - so this relaxes presence only, never type checking.
-
-    Usage: `get_optional_from_json_object(val, difficulty_top64, "difficulty_top64");`
-  */
-  template<typename Type>
-  void get_optional_from_json_object(const rapidjson::Value& val, Type& dest, const char* key)
-  {
-    const auto member = val.FindMember(key);
-    if (member != val.MemberEnd())
-    {
-      fromJsonValue(member->value, dest);
-    }
-  }
 }
 
 void read_hex(const rapidjson::Value& val, epee::span<std::uint8_t> dest)
@@ -960,7 +934,6 @@ void fromJsonValue(const rapidjson::Value& val, cryptonote::rpc::tx_in_pool& tx)
   }
 
   GET_FROM_JSON_OBJECT(val, tx.tx, tx);
-  GET_FROM_JSON_OBJECT(val, tx.tx_hash, tx_hash);
   GET_FROM_JSON_OBJECT(val, tx.blob_size, blob_size);
   GET_FROM_JSON_OBJECT(val, tx.weight, weight);
   GET_FROM_JSON_OBJECT(val, tx.fee, fee);
@@ -1108,13 +1081,6 @@ void toJsonValue(rapidjson::Writer<epee::byte_stream>& dest, const cryptonote::r
 {
   dest.StartObject();
 
-  // `difficulty` and `difficulty_top64` together carry the full 128-bit
-  // `wide_difficulty`: the low 64 bits and the high 64 bits respectively. This
-  // mirrors the `DaemonInfo` serializer below and the HTTP block-header
-  // contract in src/rpc/core_rpc_server_commands_defs.h. Writing only
-  // `difficulty` would truncate every difficulty above 2^64 - 1.
-  const uint64_t difficulty_top64 = (response.wide_difficulty >> 64).convert_to<std::uint64_t>();
-
   INSERT_INTO_JSON_OBJECT(dest, major_version, response.major_version);
   INSERT_INTO_JSON_OBJECT(dest, minor_version, response.minor_version);
   INSERT_INTO_JSON_OBJECT(dest, timestamp, response.timestamp);
@@ -1124,7 +1090,6 @@ void toJsonValue(rapidjson::Writer<epee::byte_stream>& dest, const cryptonote::r
   INSERT_INTO_JSON_OBJECT(dest, depth, response.depth);
   INSERT_INTO_JSON_OBJECT(dest, hash, response.hash);
   INSERT_INTO_JSON_OBJECT(dest, difficulty, response.difficulty);
-  INSERT_INTO_JSON_OBJECT(dest, difficulty_top64, difficulty_top64);
   INSERT_INTO_JSON_OBJECT(dest, reward, response.reward);
 
   dest.EndObject();
@@ -1137,8 +1102,6 @@ void fromJsonValue(const rapidjson::Value& val, cryptonote::rpc::BlockHeaderResp
     throw WRONG_TYPE("json object");
   }
 
-  uint64_t difficulty_top64 = 0;
-
   GET_FROM_JSON_OBJECT(val, response.major_version, major_version);
   GET_FROM_JSON_OBJECT(val, response.minor_version, minor_version);
   GET_FROM_JSON_OBJECT(val, response.timestamp, timestamp);
@@ -1149,16 +1112,6 @@ void fromJsonValue(const rapidjson::Value& val, cryptonote::rpc::BlockHeaderResp
   GET_FROM_JSON_OBJECT(val, response.hash, hash);
   GET_FROM_JSON_OBJECT(val, response.difficulty, difficulty);
   GET_FROM_JSON_OBJECT(val, response.reward, reward);
-
-  // `difficulty_top64` was added to this response after
-  // `DAEMON_RPC_VERSION_ZMQ` 2.0, so it is read optionally: an older daemon's
-  // payload carries only `difficulty` and then yields the same value it always
-  // did, now widened. See `get_optional_from_json_object` above.
-  get_optional_from_json_object(val, difficulty_top64, "difficulty_top64");
-
-  response.wide_difficulty = difficulty_top64;
-  response.wide_difficulty <<= 64;
-  response.wide_difficulty += response.difficulty;
 }
 
 void toJsonValue(rapidjson::Writer<epee::byte_stream>& dest, const rct::rctSig& sig, const bool prune)
@@ -1567,10 +1520,6 @@ void toJsonValue(rapidjson::Writer<epee::byte_stream>& dest, const cryptonote::r
   INSERT_INTO_JSON_OBJECT(dest, amount, dist.amount);
   INSERT_INTO_JSON_OBJECT(dest, start_height, dist.data.start_height);
   INSERT_INTO_JSON_OBJECT(dest, base, dist.data.base);
-  // `cumulative` tells the client whether `distribution` holds running totals
-  // or per-block counts, which cannot be inferred from the data itself, so it
-  // is part of the response and not merely an echo of the request flag.
-  INSERT_INTO_JSON_OBJECT(dest, cumulative, dist.cumulative);
 
   dest.EndObject();
 }
@@ -1586,17 +1535,6 @@ void fromJsonValue(const rapidjson::Value& val, cryptonote::rpc::output_distribu
   GET_FROM_JSON_OBJECT(val, dist.amount, amount);
   GET_FROM_JSON_OBJECT(val, dist.data.start_height, start_height);
   GET_FROM_JSON_OBJECT(val, dist.data.base, base);
-
-  // `cumulative` was added to this response after `DAEMON_RPC_VERSION_ZMQ`
-  // 2.0, so it is read optionally: an older daemon's payload does not carry it
-  // and the flag then reads as false, which is what such a daemon's
-  // `distribution` always was. See `get_optional_from_json_object` above. The
-  // read goes through a local so that `dist` is fully determined by the payload
-  // even when the caller reuses an object, exactly as the required reads above
-  // determine their members.
-  bool cumulative = false;
-  get_optional_from_json_object(val, cumulative, "cumulative");
-  dist.cumulative = cumulative;
 }
 
 }  // namespace json

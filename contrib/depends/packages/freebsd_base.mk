@@ -1,3 +1,11 @@
+# 12.3-RELEASE has been end of life since 2023. This base archive is immutable,
+# receives no security updates, and predates the libc fix in
+# FreeBSD-SA-23:15.stdio (CVE-2023-5941), so code inlined from its headers and
+# any statically linked base component carries the unpatched version.
+# x86_64-unknown-freebsd is therefore security-blocked for published artifacts
+# until a supported, patched, reproducible sysroot is authorized: see
+# docs/COMPILING_DEBUGGING_TESTING.md, "Cross-build dialect exceptions".
+# Replacing this pin is a release-engineering decision, not a build fix.
 package=freebsd_base
 $(package)_version=12.3
 $(package)_download_path=https://archive.freebsd.org/old-releases/amd64/$($(package)_version)-RELEASE/

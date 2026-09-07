@@ -1,3 +1,9 @@
+# This version is behind the current OpenSSL security releases: the 3.5 branch
+# is fixed in 3.5.8 and the 3.6 branch in 3.6.4. Raising it is a deliberate
+# dependency update - it changes this package's build id and every dependent's,
+# so it invalidates the depends caches - and is tracked in
+# docs/COMPILING_DEBUGGING_TESTING.md, "Dependency security posture", together
+# with the version to build against. It is not changed by a dialect migration.
 package=openssl
 $(package)_version=3.5.7
 $(package)_download_path=https://github.com/openssl/openssl/releases/download/openssl-$($(package)_version)
