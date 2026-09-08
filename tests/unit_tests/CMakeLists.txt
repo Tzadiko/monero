@@ -147,6 +147,18 @@ add_test(
   NAME    unit_tests
   COMMAND unit_tests --data-dir "${TEST_DATA_DIR}")
 
+# Several suites in this binary (blocked_mode_client, socks_client, socks_connector,
+# test_epee_connection, http_server, node_server) bind loopback sockets, some of them on
+# fixed ports. Sharing a resource lock with the equally socket-heavy functional suite
+# keeps the two from ever overlapping under `ctest -j`, where they would compete for the
+# same ports and the same ephemeral range. The explicit timeout replaces ctest's 1500 s
+# default: this binary alone has been measured at over 1300 s on a contended host, before
+# any of the bounded waits its network tests use to ride out a momentarily exhausted
+# ephemeral range.
+set_tests_properties(unit_tests PROPERTIES
+  RESOURCE_LOCK monero_loopback_sockets
+  TIMEOUT 3600)
+
 monero_add_minimal_executable(test_notifier test_notifier.cpp)
 target_link_libraries(test_notifier ${EXTRA_LIBRARIES})
 set_property(TARGET test_notifier PROPERTY FOLDER "tests")

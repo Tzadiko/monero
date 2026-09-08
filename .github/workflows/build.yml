@@ -15,7 +15,11 @@ env:
   REMOVE_BUNDLED_PACKAGES : sudo rm -rf /usr/local
   # ARCH="default" (not "native") ensures, that a different execution host can execute binaries compiled elsewhere.
   BUILD_DEFAULT: 'cmake -S . -B build -D ARCH="default" -D BUILD_TESTS=ON -D BUILD_GUI_DEPS=ON -D ENABLE_FUZZ_TEST=ON -D CMAKE_BUILD_TYPE=Release && cmake --build build --target all'
-  APT_INSTALL_LINUX: 'apt -y install build-essential cmake libboost-all-dev libunbound-dev graphviz doxygen libunwind-dev pkg-config libssl-dev libzmq3-dev libsodium-dev libhidapi-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler ccache curl git'
+  # libreadline-dev enables the epee_readline target; the python modules are what
+  # tests/functional_tests/CMakeLists.txt probes for before registering
+  # functional_tests_rpc and check_missing_rpc_methods. The modules are installed
+  # without recommends because python3-deepdiff otherwise pulls in ~250 packages.
+  APT_INSTALL_LINUX: 'apt -y install build-essential cmake libboost-all-dev libunbound-dev graphviz doxygen libunwind-dev pkg-config libssl-dev libzmq3-dev libsodium-dev libreadline-dev libhidapi-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler ccache curl git && apt -y install --no-install-recommends python3 python3-requests python3-zmq python3-deepdiff'
   APT_SET_CONF: |
     tee -a /etc/apt/apt.conf.d/80-custom << EOF
     Acquire::Retries "3";
@@ -117,7 +121,7 @@ jobs:
       image: archlinux:latest
     steps:
       - name: install dependencies
-        run: pacman -Syyu --noconfirm base-devel git rust cmake boost boost-libs openssl zeromq unbound libsodium readline expat gtest python3 doxygen graphviz hidapi libusb protobuf ccache
+        run: pacman -Syyu --noconfirm base-devel git rust cmake boost boost-libs openssl zeromq unbound libsodium readline expat gtest python3 python-requests python-pyzmq python-deepdiff doxygen graphviz hidapi libusb protobuf ccache
       - name: configure git
         run: git config --global --add safe.directory '*'
       - uses: actions/checkout@v5

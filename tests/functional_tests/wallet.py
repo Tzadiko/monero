@@ -314,11 +314,16 @@ class WalletTest():
         except: pass
         languages = res.languages
         languages_local = res.languages_local
+        # create_wallet requires a name it can actually write, so reuse one scratch wallet name and
+        # clear its files before each create (create_wallet fails with -21 if the file exists)
+        scratch_wallet = 'test_languages'
         for language in languages + languages_local:
             sys.stdout.write('Creating ' + language + ' wallet\n')
-            wallet.create_wallet(filename = '', language = language)
+            util_resources.remove_wallet_files(scratch_wallet)
+            wallet.create_wallet(filename = scratch_wallet, language = language)
             res = wallet.query_key('mnemonic')
             wallet.close_wallet()
+        util_resources.remove_wallet_files(scratch_wallet)
 
     def change_password(self):
         print('Testing password change')

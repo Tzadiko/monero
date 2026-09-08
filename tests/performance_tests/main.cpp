@@ -110,6 +110,14 @@ int main(int argc, char** argv)
   core_params.verbose = command_line::get_arg(vm, arg_verbose);
   core_params.stats = command_line::get_arg(vm, arg_stats);
   core_params.loop_multiplier = command_line::get_arg(vm, arg_loop_multiplier);
+  // The multiplier scales every test's loop count and is the divisor of the per-call timing, so a
+  // zero would run no iterations at all and divide by zero. Reject it here: this is the single
+  // validation point for the value, every consumer downstream assumes it is non-zero.
+  if (0 == core_params.loop_multiplier)
+  {
+    std::cerr << "Invalid --loop-multiplier value 0: the multiplier must be 1 or greater" << std::endl;
+    return 1;
+  }
 
   ParamsShuttle p{core_params};
 

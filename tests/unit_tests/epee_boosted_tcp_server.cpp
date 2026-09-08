@@ -28,10 +28,12 @@
 // 
 // Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
+#include <boost/asio/error.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/chrono/chrono.hpp>
 #include <boost/thread/condition_variable.hpp>
 #include <boost/thread/mutex.hpp>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -1014,7 +1016,23 @@ TEST(test_epee_connection, ssl_handshake_fingerprint_lookup)
         ADD_FAILURE() << "could not open the loopback acceptor: " << ec.message();
         return fingerprint_setup_failure();
       }
-      acceptor.bind(bind_endpoint, ec);
+      // Binding port 0 can fail with EADDRINUSE without any port being taken: it means
+      // the host's whole ephemeral range is momentarily in use, which is reachable in the
+      // default ctest order where this suite runs straight after the socket-heavy
+      // functional suite and its tens of thousands of closed connections are still in
+      // TIME_WAIT. The range recovers as those expire, so retry past the kernel's 60 s
+      // TIME_WAIT to ride the window out. Any other error, and an expired window, still
+      // ends the attempt below exactly as an unretried bind would have.
+      const auto bind_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{150};
+      for (;;)
+      {
+        acceptor.bind(bind_endpoint, ec);
+        if (ec != boost::asio::error::address_in_use)
+          break;
+        if (bind_deadline <= std::chrono::steady_clock::now())
+          break;
+        std::this_thread::sleep_for(std::chrono::milliseconds{250});
+      }
       if (ec)
       {
         ADD_FAILURE() << "could not bind the loopback acceptor: " << ec.message();

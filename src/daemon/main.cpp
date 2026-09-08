@@ -114,7 +114,15 @@ bool isFat32(const wchar_t* root_path)
   std::vector<wchar_t> fs(MAX_PATH + 1);
   if (!::GetVolumeInformationW(root_path, nullptr, 0, nullptr, 0, nullptr, &fs[0], MAX_PATH))
   {
-    MERROR("Failed to get '" << root_path << "' filesystem name. Error code: " << ::GetLastError());
+    // The Win32 volume API is UTF-16 (root_path is a const wchar_t*, because
+    // boost::filesystem::path::value_type is wchar_t on Windows), while the logging macros
+    // expand into a narrow std::stringstream (LOG_TO_STRING in misc_log_ex.h), so the path
+    // must be narrowed before it is streamed: C++20 (P1423R3) deletes the narrow-stream
+    // inserters for wchar_t pointers, making the unconverted form a hard error. Before C++20
+    // the same call bound to operator<<(const void*) and logged a pointer value instead of
+    // the path, so converting here also restores the intended diagnostic.
+    MERROR("Failed to get '" << epee::string_tools::utf16_to_utf8(root_path)
+      << "' filesystem name. Error code: " << ::GetLastError());
     return false;
   }
 
@@ -244,6 +252,25 @@ int main(int argc, char const * argv[])
     catch (const std::runtime_error&)
     {
       std::cerr << "Can't specify more than one of --testnet and --stagenet and --regtest" << ENDL;
+      return 1;
+    }
+
+    // Reject an empty data directory here, before the value is made absolute and before any
+    // directory, log file, database or RPC TLS key pair is created from it: an empty value would
+    // otherwise be anchored at the process working directory and scatter the whole chain
+    // directory - including the rpc_ssl.key private key - wherever the daemon happened to be
+    // started from. This deliberately inspects the raw stored value instead of
+    // command_line::get_arg(): arg_data_dir is a dependent argument whose transform appends
+    // "testnet"/"stagenet"/"fake" for --testnet/--stagenet/--regtest, so for those networks
+    // get_arg() turns an empty value into a non-empty relative path and never looks empty.
+    // A value is always present at this point because arg_data_dir carries a default that
+    // po::store() has already applied; the emptiness guard also covers the degenerate case of
+    // no value at all, for which no data directory can be resolved either.
+    const po::variable_value &data_dir_arg = vm[cryptonote::arg_data_dir.name];
+    if (data_dir_arg.empty() || data_dir_arg.as<std::string>().empty())
+    {
+      // log system isn't initialized yet
+      std::cerr << "Invalid --" << cryptonote::arg_data_dir.name << ": an empty data directory is not accepted, specify a path or omit the option to use the default" << ENDL;
       return 1;
     }
 

@@ -188,7 +188,15 @@ namespace net_load_tests
         LOG_PRINT_L0("Connection isn't opened");
         return false;
       }
-      if (!m_tcp_server.get_config_object().close(m_connections[idx], true))
+      // Non-blocking close. Both callers run inside an io_context handler - the client from
+      // connect_async's completion callback, the server from on_connection_new - and
+      // close(..., true) blocks that thread for up to five seconds waiting for a shutdown
+      // sequence that itself needs an io_context thread, so it starves the work it waits for:
+      // at a requested 2000 connections the client managed only 493 opens inside the test's
+      // 30 s window, with 392 "did not shut down" errors. For a connection in the RUNNING
+      // state - the case this helper creates - the non-blocking form still returns true after
+      // starting the asynchronous teardown, so the accounting below is unchanged.
+      if (!m_tcp_server.get_config_object().close(m_connections[idx], false))
       {
         LOG_PRINT_L0("Close connection error: " << m_connections[idx]);
         if (!ignore_close_fails)
@@ -216,6 +224,17 @@ namespace net_load_tests
   const unsigned int min_thread_count = 2;
   const std::string clt_port("36230");
   const std::string srv_port("36231");
+
+  // This is a plaintext levin load harness, so every socket it creates - listening
+  // and outgoing alike - must be created with SSL explicitly disabled rather than with
+  // boosted_tcp_server's default e_ssl_support_autodetect. An outgoing connection is
+  // started with connection<T>::start(false /*is_income*/, ...), and that path never
+  // calls start_handshake() (which, moreover, hardcodes handshake_t::server), while
+  // any ssl_support other than e_ssl_support_disabled leaves m_state.ssl.enabled true
+  // with m_state.ssl.handshaked false for the connection's whole life. start_write()
+  // refuses to send in exactly that state, so the outgoing write queue would never
+  // drain and every levin invoke on it would fail.
+  constexpr epee::net_utils::ssl_support_t test_ssl_support = epee::net_utils::ssl_support_t::e_ssl_support_disabled;
 
   enum command_ids
   {

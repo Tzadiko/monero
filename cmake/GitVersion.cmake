@@ -30,19 +30,91 @@
 
 # Check what commit we're on
 
+# Read the commit identity that `git archive` stamps into the top-level
+# version.cmake, which .gitattributes marks `export-subst` for that purpose.
+#
+# Sets VERSIONTAG and VERSION_IS_RELEASE in the caller's scope, and leaves
+# VERSIONTAG empty when the tree carries no usable stamp. That is the normal case
+# in a Git working tree, where the placeholders are verbatim and the commit comes
+# from Git itself, and also in an archive produced by a tool that copies the
+# working tree rather than asking Git for its content.
+#
+# The stamp is parsed textually instead of being included: an archive is
+# untrusted input, and a verbatim placeholder must never be mistaken for a hash.
+function (get_version_tag_from_archive)
+    set(VERSIONTAG "" PARENT_SCOPE)
+    set(VERSION_IS_RELEASE "false" PARENT_SCOPE)
+
+    # Anchored on the directory holding this file rather than on whichever
+    # listfile is being processed when the function runs, so the stamp is found
+    # wherever the project is included from.
+    set(ARCHIVE_STAMP "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../version.cmake")
+    if(NOT EXISTS "${ARCHIVE_STAMP}")
+        return()
+    endif()
+
+    file(READ "${ARCHIVE_STAMP}" ARCHIVE_STAMP_CONTENT)
+    if(NOT ARCHIVE_STAMP_CONTENT MATCHES "MONERO_ARCHIVE_COMMIT_HASH[ \t]+\"([0-9a-f]+)\"")
+        return()
+    endif()
+
+    # Accept nothing but a complete, substituted hash: git writes the full 40
+    # hexadecimal characters, and an unsubstituted placeholder cannot match them.
+    set(COMMIT "${CMAKE_MATCH_1}")
+    string(LENGTH "${COMMIT}" COMMIT_LENGTH)
+    if(NOT COMMIT_LENGTH EQUAL 40)
+        return()
+    endif()
+
+    string(SUBSTRING "${COMMIT}" 0 9 COMMIT)
+    message(STATUS "You are building from a source archive of commit ${COMMIT}")
+
+    # The ref names stamped beside the hash carry a tag when the archive was cut
+    # from a tagged commit, which is the condition the Git working tree path
+    # below reports as a release build.
+    set(ARCHIVE_IS_TAGGED "false")
+    if(ARCHIVE_STAMP_CONTENT MATCHES "MONERO_ARCHIVE_COMMIT_REFS[ \t]+\"([^\"]*)\"")
+        if("${CMAKE_MATCH_1}" MATCHES "tag: ")
+            set(ARCHIVE_IS_TAGGED "true")
+        endif()
+    endif()
+
+    if(ARCHIVE_IS_TAGGED STREQUAL "true")
+        message(STATUS "You are building a tagged release")
+        set(VERSIONTAG "release" PARENT_SCOPE)
+        set(VERSION_IS_RELEASE "true" PARENT_SCOPE)
+    else()
+        set(VERSIONTAG "${COMMIT}" PARENT_SCOPE)
+        set(VERSION_IS_RELEASE "false" PARENT_SCOPE)
+    endif()
+endfunction()
+
 function (get_version_tag_from_git GIT)
     execute_process(COMMAND "${GIT}" rev-parse --short=9 HEAD
                     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
                     RESULT_VARIABLE RET
                     OUTPUT_VARIABLE COMMIT
-                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+                    ERROR_VARIABLE GIT_ERROR
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_STRIP_TRAILING_WHITESPACE)
 
     if(RET)
-        # Something went wrong, set the version tag to -unknown
+        # There is no Git information here. Building from a source archive is the
+        # ordinary reason, and an archive created by `git archive` carries the
+        # commit identity in version.cmake instead, so ask for that before
+        # giving up. Git's own diagnostic was captured above rather than printed,
+        # and is reported below only if nothing identifies the commit.
 
-        message(WARNING "Cannot determine current commit. Make sure that you are building either from a Git working tree or from a source archive.")
-        set(VERSIONTAG "unknown")
-        set(VERSION_IS_RELEASE "false")
+        get_version_tag_from_archive()
+
+        if(VERSIONTAG STREQUAL "")
+            # Something went wrong, set the version tag to -unknown
+
+            message(WARNING "Cannot determine current commit. Make sure that you are building either from a Git working tree or from a source archive.\n"
+                            "Git reported: ${GIT_ERROR}")
+            set(VERSIONTAG "unknown")
+            set(VERSION_IS_RELEASE "false")
+        endif()
     else()
         string(SUBSTRING ${COMMIT} 0 9 COMMIT)
         message(STATUS "You are currently on commit ${COMMIT}")

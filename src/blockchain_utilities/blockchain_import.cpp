@@ -78,6 +78,43 @@ namespace po = boost::program_options;
 using namespace cryptonote;
 using namespace epee;
 
+namespace
+{
+  /**
+   * @brief run a BlockchainDB write call inside a write transaction
+   *
+   * BlockchainDB::add_block() writes through a write transaction the caller is
+   * expected to have open - BlockchainLMDB's write cursors dereference it - and
+   * opens none of its own, unlike pop_block(), which does. Batching keeps one
+   * transaction open for a whole batch, so with batching disabled (--batch 0)
+   * there is none at all and the write dereferences a null transaction.
+   *
+   * Running the write through this helper covers both cases: db_wtxn_guard is a
+   * no-op while a batch transaction is active, so the batched path keeps
+   * committing per batch exactly as before, and without a batch the write gets
+   * a transaction of its own, committed on success and aborted if the write
+   * throws so that a failed write leaves no partial data behind.
+   *
+   * @param db   the database to write to
+   * @param write the write call to perform
+   */
+  template<typename F>
+  void with_write_txn(BlockchainDB& db, F&& write)
+  {
+    db_wtxn_guard wtxn_guard(&db);
+    try
+    {
+      write();
+    }
+    catch (...)
+    {
+      wtxn_guard.abort();
+      throw;
+    }
+    wtxn_guard.stop();
+  }
+}
+
 // db_mode: safe, fast, fastest
 int get_db_flags_from_mode(const std::string& db_mode)
 {
@@ -103,6 +140,7 @@ int pop_blocks(cryptonote::core& core, int num_blocks)
   for (int i=0; i < num_blocks; ++i)
   {
     // simple_core.m_storage.pop_block_from_blockchain() is private, so call directly through db
+    // (BlockchainDB::pop_block() runs in a write transaction of its own, batched or not)
     core.get_blockchain_storage().get_db().pop_block(popped_block, /*txs=*/nullptr);
     quit = 1;
   }
@@ -231,7 +269,7 @@ int import_from_file(cryptonote::core& core, const std::string& import_file_path
   if (!boost::filesystem::exists(fs_import_file_path, ec))
   {
     MFATAL("bootstrap file not found: " << fs_import_file_path);
-    return false;
+    return 1;
   }
 
   uint64_t block_first;
@@ -244,11 +282,23 @@ int import_from_file(cryptonote::core& core, const std::string& import_file_path
   std::streampos pos;
   // BootstrapFile bootstrap(import_file_path);
   uint64_t total_source_blocks = bootstrap.count_blocks(import_file_path, pos, seek_height, block_first);
+  if (!total_source_blocks)
+  {
+    // Nothing was scanned, so the file carries no block at all (for instance it
+    // is shorter than its own header). Report it rather than computing a last
+    // block number from a zero count, which would underflow.
+    MFATAL("bootstrap file contains no blocks: " << fs_import_file_path);
+    return 1;
+  }
   MINFO("bootstrap file last block number: " << total_source_blocks+block_first-1 << " (zero-based height)  total blocks: " << total_source_blocks);
 
   if (total_source_blocks+block_first-1 <= start_height)
   {
-    return false;
+    // The database already holds every block the file has: there is nothing to
+    // import, which is a successful no-op rather than a failure.
+    MINFO("Blockchain height " << start_height << " is already at or past the bootstrap file's last block "
+        << total_source_blocks+block_first-1 << " - nothing to import");
+    return 0;
   }
 
   std::cout << ENDL;
@@ -263,7 +313,7 @@ int import_from_file(cryptonote::core& core, const std::string& import_file_path
   if (import_file.fail())
   {
     MFATAL("import_file.open() fail");
-    return false;
+    return 1;
   }
 
   // 4 byte magic + (currently) 1024 byte header structures
@@ -489,7 +539,12 @@ int import_from_file(cryptonote::core& core, const std::string& import_file_path
           try
           {
             uint64_t long_term_block_weight = core.get_blockchain_storage().get_next_long_term_block_weight(block_weight);
-            core.get_blockchain_storage().get_db().add_block(std::make_pair(b, block_to_blob(b)), block_weight, long_term_block_weight, cumulative_difficulty, coins_generated, txs);
+            BlockchainDB &db = core.get_blockchain_storage().get_db();
+            // The add needs a write transaction, which batching provides and
+            // --batch 0 does not.
+            with_write_txn(db, [&]() {
+              db.add_block(std::make_pair(b, block_to_blob(b)), block_weight, long_term_block_weight, cumulative_difficulty, coins_generated, txs);
+            });
           }
           catch (const std::exception& e)
           {
@@ -504,13 +559,20 @@ int import_from_file(cryptonote::core& core, const std::string& import_file_path
             if ((h-1) % db_batch_size == 0)
             {
               uint64_t bytes, h2;
-              bool q2;
+              bool q2 = false;
               std::cout << refresh_string;
               // zero-based height
               std::cout << ENDL << "[- batch commit at height " << h-1 << " -]" << ENDL;
               core.get_blockchain_storage().get_db().batch_stop();
               pos = import_file.tellg();
               bytes = bootstrap.count_bytes(import_file, db_batch_size, h2, q2);
+              // Sizing the next batch reads ahead and stops at the end of the
+              // file, which leaves the stream in a failed state in which
+              // seekg() does nothing - and the blocks of the last, short batch
+              // would then never be read. Clear it first, as the initial sizing
+              // above does.
+              if (import_file.eof())
+                import_file.clear();
               import_file.seekg(pos);
               core.get_blockchain_storage().get_db().batch_start(db_batch_size, bytes);
               std::cout << ENDL;
@@ -559,6 +621,29 @@ quitting:
     MINFO("Finished at block: " << h-1 << "  total blocks: " << h);
 
   std::cout << ENDL;
+
+  // Report success only when the import reached the block it was asked for, so
+  // that a caller checking the exit status can tell a completed restore from a
+  // partial one. quit > 1 marks the error paths above, whose pending batch was
+  // deliberately left uncommitted; a read loop that ended earlier than the
+  // wanted block means the file did not carry the whole range (it was truncated
+  // or damaged). The wanted block is the requested stop height, or the file's
+  // own last block when that comes first, since no file can deliver more than
+  // it holds.
+  const uint64_t file_block_last = total_source_blocks + block_first - 1;
+  const uint64_t wanted_block_last = std::min(block_stop, file_block_last);
+  const uint64_t imported_block_last = h ? h - 1 : 0;
+  if (quit > 1)
+  {
+    MFATAL("Import aborted at block " << imported_block_last << " of " << wanted_block_last
+        << "; the database was left at the last committed block");
+    return 1;
+  }
+  if (imported_block_last < wanted_block_last)
+  {
+    MFATAL("Import incomplete: reached block " << imported_block_last << " of " << wanted_block_last);
+    return 1;
+  }
   return 0;
 }
 
@@ -607,6 +692,7 @@ int main(int argc, char* argv[])
   command_line::add_arg(desc_cmd_only, arg_pop_blocks);
   command_line::add_arg(desc_cmd_only, arg_drop_hf);
   command_line::add_arg(desc_cmd_only, command_line::arg_help);
+  command_line::add_arg(desc_cmd_only, command_line::arg_version);
 
   // call add_options() directly for these arguments since
   // command_line helpers support only boolean switch, not boolean argument
@@ -640,7 +726,13 @@ int main(int argc, char* argv[])
   {
     std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL << ENDL;
     std::cout << desc_options << std::endl;
-    return 1;
+    return 0;
+  }
+
+  if (command_line::get_arg(vm, command_line::arg_version))
+  {
+    std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL;
+    return 0;
   }
 
   if (! opt_batch && !command_line::is_arg_defaulted(vm, arg_batch_size))
@@ -757,13 +849,18 @@ int main(int argc, char* argv[])
     return 0;
   }
 
-  import_from_file(core, import_file_path, block_stop);
+  const int import_result = import_from_file(core, import_file_path, block_stop);
 
   // ensure db closed
   //   - transactions properly checked and handled
   //   - disk sync if needed
   //
   core.deinit();
+
+  // A failed or incomplete import must be visible in the exit status: scripted
+  // restores check it, and the log alone told them nothing.
+  if (import_result != 0)
+    return 1;
   }
   catch (const DB_ERROR& e)
   {

@@ -69,6 +69,7 @@ int main(int argc, char* argv[])
   command_line::add_arg(desc_cmd_sett, arg_height);
   command_line::add_arg(desc_cmd_sett, arg_include_coinbase);
   command_line::add_arg(desc_cmd_only, command_line::arg_help);
+  command_line::add_arg(desc_cmd_only, command_line::arg_version);
 
   po::options_description desc_options("Allowed options");
   desc_options.add(desc_cmd_only).add(desc_cmd_sett);
@@ -88,7 +89,13 @@ int main(int argc, char* argv[])
   {
     std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL << ENDL;
     std::cout << desc_options << std::endl;
-    return 1;
+    return 0;
+  }
+
+  if (command_line::get_arg(vm, command_line::arg_version))
+  {
+    std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL;
+    return 0;
   }
 
   mlog_configure(mlog_get_default_log_path("monero-blockchain-depth.log"), true);

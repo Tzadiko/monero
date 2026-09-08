@@ -40,6 +40,7 @@ extern "C"
 #include "crypto/generators.h"
 #include "cryptonote_basic/merge_mining.h"
 #include "fcmp_pp/fcmp_pp_crypto.h"
+#include "fcmp_pp/tower_cycle.h"
 #include "ringct/rctOps.h"
 #include "ringct/rctSigs.h"
 #include "ringct/rctTypes.h"
@@ -80,6 +81,25 @@ namespace
     crypto::random32_unbiased(s);
     if (fe_frombytes_vartime(rand_fe, s) != 0)
       throw std::runtime_error("invalid random fe");
+  }
+
+  // The FCMP++ Rust FFI consumes a coordinate as 32 little-endian bytes of a canonical
+  // Ed25519 field element (strictly less than p = 2^255 - 19), which is exactly the
+  // layout of crypto::ec_coord that fcmp_pp::point_to_wei_x_y fills in on the
+  // production path. This lets a test state such a coordinate byte by byte.
+  crypto::ec_coord ec_coord_from_le_bytes(const unsigned char (&le_bytes)[32])
+  {
+    crypto::ec_coord coord;
+    memcpy(to_bytes(coord), le_bytes, sizeof(le_bytes));
+    return coord;
+  }
+
+  // fcmp++.h documents SeleneScalar as opaque to the C/C++ side (it carries a Montgomery
+  // residue of the input, not the input bytes), so bit-identity of two returned values is
+  // the only property a C++ test may assert about it.
+  bool selene_scalars_equal(const SeleneScalar &a, const SeleneScalar &b)
+  {
+    return memcmp(&a, &b, sizeof(SeleneScalar)) == 0;
   }
 }
 
@@ -520,6 +540,168 @@ TEST(Crypto, mul8_is_identity_vartime)
     crypto::ec_point _;
     ASSERT_FALSE(fcmp_pp::get_valid_torsion_cleared_point_vartime(rct::rct2pt(point), _));
   }
+}
+
+/*
+The two tests below are the only code in the tree that crosses the C++-to-Rust FFI
+boundary of src/fcmp_pp/fcmp_pp_rust. That library exports a single function -
+selene_scalar_from_bytes, declared in the generated fcmp_pp_rust/fcmp++.h - whose only
+C++ caller is the wrapper fcmp_pp::tower_cycle::selene_scalar_from_bytes, itself called
+only from CurveTrees::flatten_leaves, which no shipped binary and no other registered
+test reaches. With nothing referencing the wrapper, the linker keeps no member of
+libfcmp_pp_rust.a in any artifact even though the archive is on fcmp_pp's link
+interface, so the crossing is present in no executable and any Rust-side FFI regression
+- a changed error convention, a changed struct size or alignment, a parser that ignores
+its input - is invisible to the whole suite. These cases both pull the archive member
+into unit_tests and give the crossing its runtime coverage.
+
+They deliberately assert nothing about the contents of a returned SeleneScalar:
+fcmp++.h documents that type as opaque to the C/C++ side (it carries a Montgomery
+residue, so little-endian 1 does not come back as 1), and pinning its encoding here
+would break on an internal change of the Rust bigint implementation while proving
+nothing about the boundary. What is asserted is structural and
+representation-independent: canonical encodings - including the Weierstrass coordinates
+the production path derives - are accepted, the mapping is deterministic and injective
+(which is what proves the 32 bytes are really parsed), and a non-canonical encoding is
+rejected on the Rust side with its error code propagated as an exception.
+*/
+TEST(Crypto, selene_scalar_from_bytes_production_path)
+{
+  // The fixed torsion-free points (shared with torsion_check_hardcoded above) keep the
+  // case reproducible; the random points widen the input space on every run.
+  static const std::vector<std::string> hardcoded_torsion_free_points = {
+      "785eda585dca4f3d27976106008ccfbca13146c8b21b8c7e4909032639a776e1",
+      "9a7b10563aa266032cd075f4e347f348a3841ae4f41572633351a97dd44066b4",
+    };
+  static const std::size_t N_RANDOM_POINTS = 32;
+
+  std::vector<rct::key> points;
+  for (const std::string &point_hex : hardcoded_torsion_free_points)
+  {
+    rct::key k;
+    ASSERT_TRUE(epee::string_tools::hex_to_pod(point_hex, k));
+    points.push_back(k);
+  }
+  const std::size_t n_hardcoded_scalars = points.size() * 2;
+  for (std::size_t i = 0; i < N_RANDOM_POINTS; ++i)
+    points.push_back(rct::pkGen());
+
+  std::vector<SeleneScalar> selene_scalars;
+  selene_scalars.reserve(points.size() * 2);
+  for (const rct::key &k : points)
+  {
+    // The same sequence CurveTrees::flatten_leaves runs: validate the point, clear
+    // torsion, convert to Weierstrass coords, hand each coord to the Rust FFI.
+    ge_p3 point;
+    ASSERT_EQ(ge_frombytes_vartime(&point, k.bytes), 0);
+    ASSERT_TRUE(rct::isInMainSubgroup(k));
+
+    crypto::ec_point torsion_free_point;
+    ASSERT_TRUE(fcmp_pp::get_valid_torsion_cleared_point_vartime(rct::rct2pt(k), torsion_free_point));
+
+    crypto::ec_coord wei_x, wei_y;
+    ASSERT_TRUE(fcmp_pp::point_to_wei_x_y(torsion_free_point, wei_x, wei_y));
+
+    // The crossing itself: coordinates produced by the production path are canonical
+    // field elements, so the FFI must return 0 and the wrapper must not throw.
+    SeleneScalar selene_x{}, selene_y{};
+    ASSERT_NO_THROW(selene_x = fcmp_pp::tower_cycle::selene_scalar_from_bytes(wei_x));
+    ASSERT_NO_THROW(selene_y = fcmp_pp::tower_cycle::selene_scalar_from_bytes(wei_y));
+
+    // Determinism: identical input bytes must cross to a bit-identical value.
+    ASSERT_TRUE(selene_scalars_equal(selene_x, fcmp_pp::tower_cycle::selene_scalar_from_bytes(wei_x)));
+    ASSERT_TRUE(selene_scalars_equal(selene_y, fcmp_pp::tower_cycle::selene_scalar_from_bytes(wei_y)));
+
+    selene_scalars.push_back(selene_x);
+    selene_scalars.push_back(selene_y);
+  }
+  ASSERT_EQ(selene_scalars.size(), points.size() * 2);
+
+  // Sensitivity, asserted on the fixed vectors only so that the assertion is
+  // reproducible: the four coordinates of the two hardcoded points are four distinct
+  // field elements, so their Selene scalars must differ pairwise. A crossing that
+  // ignored its input, or that handed back a zeroed struct on an unnoticed error,
+  // would collide here.
+  for (std::size_t i = 0; i < n_hardcoded_scalars; ++i)
+    for (std::size_t j = i + 1; j < n_hardcoded_scalars; ++j)
+      EXPECT_FALSE(selene_scalars_equal(selene_scalars[i], selene_scalars[j]));
+}
+
+TEST(Crypto, selene_scalar_from_bytes_canonical_bound)
+{
+  // Little-endian encodings that are canonical Ed25519 field elements, p = 2^255 - 19.
+  static const unsigned char LE_ZERO[32] = {0x00};
+  static const unsigned char LE_ONE[32] = {0x01};
+  static const unsigned char LE_TWO[32] = {0x02};
+  static const unsigned char LE_P_MINUS_1[32] = {
+      0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f
+    };
+
+  // Little-endian encodings of values >= p, which are not canonical field elements.
+  static const unsigned char LE_P[32] = {
+      0xed, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f
+    };
+  static const unsigned char LE_ALL_ONES[32] = {
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+      0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff
+    };
+  static const unsigned char LE_TWO_POW_255[32] = {
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80
+    };
+  static const unsigned char LE_TWO_POW_255_PLUS_1[32] = {
+      0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80
+    };
+
+  const std::vector<crypto::ec_coord> canonical_coords = {
+      ec_coord_from_le_bytes(LE_ZERO),
+      ec_coord_from_le_bytes(LE_ONE),
+      ec_coord_from_le_bytes(LE_TWO),
+      ec_coord_from_le_bytes(LE_P_MINUS_1)
+    };
+
+  std::vector<SeleneScalar> selene_scalars;
+  selene_scalars.reserve(canonical_coords.size());
+  for (const crypto::ec_coord &coord : canonical_coords)
+  {
+    SeleneScalar selene_scalar{};
+    ASSERT_NO_THROW(selene_scalar = fcmp_pp::tower_cycle::selene_scalar_from_bytes(coord));
+    ASSERT_TRUE(selene_scalars_equal(selene_scalar, fcmp_pp::tower_cycle::selene_scalar_from_bytes(coord)));
+    selene_scalars.push_back(selene_scalar);
+  }
+  ASSERT_EQ(selene_scalars.size(), canonical_coords.size());
+
+  // Injectivity over four distinct canonical field elements, including both ends of the
+  // range: distinct inputs must not collapse onto one value.
+  for (std::size_t i = 0; i < selene_scalars.size(); ++i)
+    for (std::size_t j = i + 1; j < selene_scalars.size(); ++j)
+      EXPECT_FALSE(selene_scalars_equal(selene_scalars[i], selene_scalars[j]));
+
+  // The canonical bound is enforced on the Rust side and the failure code must reach the
+  // caller as an exception rather than as an unchecked return. Each of these crossings
+  // logs one expected LOG_ERROR line naming the failing FFI call and its error code.
+  const std::vector<crypto::ec_coord> non_canonical_coords = {
+      ec_coord_from_le_bytes(LE_P),                  // p itself, the first non-canonical value
+      ec_coord_from_le_bytes(LE_ALL_ONES),           // 2^256 - 1
+      ec_coord_from_le_bytes(LE_TWO_POW_255),        // high bit set, no low bits
+      ec_coord_from_le_bytes(LE_TWO_POW_255_PLUS_1)  // high bit set over a canonical low half
+    };
+
+  for (const crypto::ec_coord &coord : non_canonical_coords)
+    EXPECT_THROW(fcmp_pp::tower_cycle::selene_scalar_from_bytes(coord), std::runtime_error);
 }
 
 TEST(Crypto, fe_constants)

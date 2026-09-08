@@ -31,6 +31,7 @@
 #include <boost/archive/portable_binary_oarchive.hpp>
 #include <boost/archive/portable_binary_iarchive.hpp>
 #include <boost/asio/buffer.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/read.hpp>
@@ -45,6 +46,7 @@
 #include <boost/uuid/nil_generator.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -99,15 +101,65 @@ namespace
         "civ5tgldg3yx73ytse6hvvk3nm6q3zctbqvytpszihm35b33ze73kxad.onion";
     static constexpr const char v3_onion_bad_version[] =
         "zpv4fa3szgel7vf6jdjeugizdclq2vzkelscs2bhbgnlldzzggcen3ac.onion";
+
+    //! How long a loopback acceptor keeps retrying a bind that failed only because the
+    //! host had no free ephemeral port.
+    //!
+    //! Every test below binds port 0 and lets the kernel pick, so EADDRINUSE from such a
+    //! bind never means "that port is taken" - it means the entire ephemeral range is
+    //! momentarily in use. That is reachable in the default ctest order, where these
+    //! tests run immediately after the socket-heavy functional suite whose tens of
+    //! thousands of closed connections are still in TIME_WAIT. The range recovers as
+    //! those expire, so retrying past the kernel's 60 s TIME_WAIT rides the window out,
+    //! and only the first acceptor to hit it waits: once one bind succeeds the range has
+    //! ports again for every test that follows.
+    constexpr std::chrono::seconds bind_retry_window{150};
+    constexpr std::chrono::milliseconds bind_retry_delay{250};
+
+    //! Bind `acceptor` to `endpoint`, retrying only on EADDRINUSE and only within
+    //! `bind_retry_window`.
+    //!
+    //! \return The last error, so any other failure - and an expired window - is still
+    //!   reported to the caller exactly as an unretried bind would have reported it.
+    boost::system::error_code bind_retrying_exhausted_ports(
+        boost::asio::ip::tcp::acceptor &acceptor, const boost::asio::ip::tcp::endpoint &endpoint)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + bind_retry_window;
+        boost::system::error_code error{};
+        for (;;)
+        {
+            acceptor.bind(endpoint, error);
+            if (error != boost::asio::error::address_in_use)
+                return error;
+            if (deadline <= std::chrono::steady_clock::now())
+                return error;
+            std::this_thread::sleep_for(bind_retry_delay);
+        }
+    }
+
+    //! An open, bound and listening acceptor on a kernel-chosen loopback port.
+    //!
+    //! Does exactly what `acceptor{io_context, endpoint}` does - open, SO_REUSEADDR,
+    //! bind, listen with the default backlog, and throw `system_error` on failure - with
+    //! the bind retried as described above.
+    boost::asio::ip::tcp::acceptor make_loopback_acceptor(boost::asio::io_context &io_context)
+    {
+        const boost::asio::ip::tcp::endpoint endpoint{boost::asio::ip::address_v4::loopback(), 0};
+        boost::asio::ip::tcp::acceptor acceptor{io_context};
+        acceptor.open(endpoint.protocol());
+        acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+        const boost::system::error_code error = bind_retrying_exhausted_ports(acceptor, endpoint);
+        if (error)
+            throw boost::system::system_error{error, "bind"};
+        acceptor.listen();
+        return acceptor;
+    }
 }
 
 TEST(blocked_mode_client, shutdown_aborts_blocked_recv)
 {
     boost::asio::io_context server_io;
-    boost::asio::ip::tcp::acceptor acceptor{
-        server_io,
-        {boost::asio::ip::address_v4::loopback(), 0}
-    };
+    boost::asio::ip::tcp::acceptor acceptor = make_loopback_acceptor(server_io);
 
     epee::net_utils::blocked_mode_client client;
     client.set_ssl(epee::net_utils::ssl_options_t{
@@ -151,10 +203,7 @@ namespace
 TEST(blocked_mode_client, shutdown_aborts_blocked_recv_from_signal_handler)
 {
     boost::asio::io_context server_io;
-    boost::asio::ip::tcp::acceptor acceptor{
-        server_io,
-        {boost::asio::ip::address_v4::loopback(), 0}
-    };
+    boost::asio::ip::tcp::acceptor acceptor = make_loopback_acceptor(server_io);
 
     epee::net_utils::blocked_mode_client client;
     client.set_ssl(epee::net_utils::ssl_options_t{
@@ -221,10 +270,7 @@ TEST(blocked_mode_client, shutdown_aborts_stalled_ssl_handshake)
     // the acceptor completes TCP connects in the kernel backlog but never
     // answers the TLS handshake, so the handshake stalls until aborted
     boost::asio::io_context server_io;
-    boost::asio::ip::tcp::acceptor acceptor{
-        server_io,
-        {boost::asio::ip::address_v4::loopback(), 0}
-    };
+    boost::asio::ip::tcp::acceptor acceptor = make_loopback_acceptor(server_io);
 
     epee::net_utils::blocked_mode_client client;
     client.set_ssl(epee::net_utils::ssl_options_t{
@@ -245,10 +291,7 @@ TEST(blocked_mode_client, shutdown_aborts_stalled_ssl_handshake)
 TEST(blocked_mode_client, shutdown_is_permanent)
 {
     boost::asio::io_context server_io;
-    boost::asio::ip::tcp::acceptor acceptor{
-        server_io,
-        {boost::asio::ip::address_v4::loopback(), 0}
-    };
+    boost::asio::ip::tcp::acceptor acceptor = make_loopback_acceptor(server_io);
 
     epee::net_utils::blocked_mode_client client;
     client.set_ssl(epee::net_utils::ssl_options_t{
@@ -1522,7 +1565,14 @@ namespace
             connected(false)
         {
             acceptor.open(boost::asio::ip::tcp::v4());
-            acceptor.bind(stream_type::endpoint{boost::asio::ip::address_v4::loopback(), 0});
+            // every socks test below shares this fixture, so this one bind is where they
+            // all meet a momentarily exhausted ephemeral range - see
+            // bind_retrying_exhausted_ports
+            const stream_type::endpoint bind_endpoint{boost::asio::ip::address_v4::loopback(), 0};
+            const boost::system::error_code bind_error =
+                bind_retrying_exhausted_ports(acceptor, bind_endpoint);
+            if (bind_error)
+                throw boost::system::system_error{bind_error, "bind"};
             acceptor.listen();
             acceptor.async_accept(server, [this] (boost::system::error_code error) {
                 this->connected = true;

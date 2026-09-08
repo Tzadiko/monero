@@ -288,6 +288,13 @@ struct options {
 
 void do_prepare_file_names(const std::string& file_path, std::string& keys_file, std::string& wallet_file, std::string &mms_file)
 {
+  // An embedded NUL is carried by std::string but terminates the path at the OS boundary, so every
+  // name derived here (keys, cache, mms) would truncate onto the same shorter path: the cache write
+  // would then overwrite the keys file and the existence check would answer for a different name than
+  // the one asked about. No filesystem can carry a NUL in a name, so refusing the path costs nothing
+  // and protects the key material.
+  THROW_WALLET_EXCEPTION_IF(file_path.find('\0') != std::string::npos, tools::error::wallet_internal_error,
+    "wallet file path contains an embedded NUL character");
   keys_file = file_path;
   wallet_file = file_path;
   if(string_tools::get_extension(keys_file) == "keys")

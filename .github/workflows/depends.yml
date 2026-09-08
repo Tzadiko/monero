@@ -116,7 +116,9 @@ jobs:
       id: depends-restore
       with:
         path: contrib/depends/built
-        key: depends-cxx23-${{ matrix.toolchain.host }}-${{ hashFiles('contrib/depends/packages/*', 'contrib/depends/Makefile', 'contrib/depends/hosts/*', 'contrib/depends/toolchain.cmake.in') }}
+        # Hash every depends build-id input (meta_depends + recipes + patches + toolchain template);
+        # a missed input changes build ids under an unchanged key, so the save step below is skipped.
+        key: depends-cxx23-${{ matrix.toolchain.host }}-${{ hashFiles('contrib/depends/packages/*', 'contrib/depends/patches/**', 'contrib/depends/Makefile', 'contrib/depends/funcs.mk', 'contrib/depends/hosts/*', 'contrib/depends/builders/*', 'contrib/depends/toolchain.cmake.in') }}
         restore-keys: depends-cxx23-${{ matrix.toolchain.host }}-
     - name: prepare w64-mingw32
       if: ${{ matrix.toolchain.host == 'x86_64-w64-mingw32' }}

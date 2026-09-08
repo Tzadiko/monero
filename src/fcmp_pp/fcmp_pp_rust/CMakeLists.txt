@@ -94,17 +94,29 @@ endif()
 set(RUST_TARGET "${RUST_ARCH}-${RUST_PLATFORM}${RUST_TOOLCHAIN}")
 message(STATUS "Using Rust target ${RUST_TARGET}")
 
+# The Rust/cargo prerequisite guard in the top-level CMakeLists.txt resolves and
+# validates the toolchain and leaves the result in CARGO_EXECUTABLE. Repeat the
+# lookup should this directory ever be configured without that guard having run,
+# so that a missing cargo is still diagnosed by name at configure time instead of
+# failing as an unnamed executable inside the custom command below.
+if(NOT CARGO_EXECUTABLE)
+  find_program(CARGO_EXECUTABLE NAMES cargo DOC "Path to the cargo build tool that builds src/fcmp_pp/fcmp_pp_rust")
+  if(NOT CARGO_EXECUTABLE)
+    message(FATAL_ERROR "cargo was not found on PATH or in the default install locations, and src/fcmp_pp/fcmp_pp_rust cannot be built without it. Install the Rust toolchain with rustup (https://rustup.rs) or from your distribution's rust/cargo package, or pass -DCARGO_EXECUTABLE=/path/to/cargo (see docs/COMPILING_DEBUGGING_TESTING.md, section \"Rust\")")
+  endif()
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   if(SANITIZE)
     message(STATUS "Using Rust ASAN")
     # Rust ASAN is an experimental feature included in nightly at time of writing
-    set(CARGO_CMD RUSTFLAGS=-Zsanitizer=address cargo +nightly build --target "${RUST_TARGET}" ${CARGO_OPTIONS})
+    set(CARGO_CMD RUSTFLAGS=-Zsanitizer=address "${CARGO_EXECUTABLE}" +nightly build --target "${RUST_TARGET}" ${CARGO_OPTIONS})
   else()
-    set(CARGO_CMD cargo build --target "${RUST_TARGET}" ${CARGO_OPTIONS})
+    set(CARGO_CMD "${CARGO_EXECUTABLE}" build --target "${RUST_TARGET}" ${CARGO_OPTIONS})
   endif()
   set(TARGET_DIR "debug")
 else ()
-  set(CARGO_CMD cargo build --target "${RUST_TARGET}" --release ${CARGO_OPTIONS})
+  set(CARGO_CMD "${CARGO_EXECUTABLE}" build --target "${RUST_TARGET}" --release ${CARGO_OPTIONS})
   set(TARGET_DIR "release")
 endif ()
 

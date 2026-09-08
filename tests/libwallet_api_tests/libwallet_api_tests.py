@@ -43,6 +43,24 @@ from signal import SIGTERM
 
 USAGE = "usage: libwallet_api_tests.py <builddir> <monerod_exe> <libwallet_api_tests_exe>"
 MINED_BLOCKS = 90
+# Client-side HTTP budget for the cheap daemon calls (/get_height and the one-block
+# pulse), which answer in milliseconds on any host.
+RPC_TIMEOUT = 30
+# The initial chain is mined a chunk at a time instead of in one request, so no single
+# HTTP request has to cover all MINED_BLOCKS blocks.
+GENERATE_BLOCKS_CHUNK = 15
+# Per-block client-side budget for a chunked "generateblocks" request; the request
+# timeout is this many seconds times the number of blocks asked for. monerod adds a
+# regtest block in 100-300 ms, so 20 s per block is generous even on a host under heavy
+# contention.
+GENERATE_BLOCKS_TIMEOUT_PER_BLOCK = 20.0
+# Overrides GENERATE_BLOCKS_TIMEOUT_PER_BLOCK, which makes the timeout-recovery path of
+# mine_to_height() directly testable: with a tiny value every block-generation request
+# gives up client-side and the run must still reach the target height.
+GENERATE_BLOCKS_TIMEOUT_ENV = "LIBWALLET_API_TESTS_BLOCK_TIMEOUT"
+# Overall budget for the whole initial mining step, after which a genuinely broken or
+# wedged daemon fails the run loudly instead of hanging until the ctest timeout.
+MINING_TIMEOUT = 900
 
 
 def reserve_ports(count):
@@ -71,7 +89,7 @@ def wait_for_port(port, timeout=20):
     raise RuntimeError("timed out waiting for port {}".format(port))
 
 
-def rpc_json(rpc_port, path, payload, timeout=30):
+def rpc_json(rpc_port, path, payload, timeout=RPC_TIMEOUT):
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         "http://127.0.0.1:{}{}".format(rpc_port, path),
@@ -100,7 +118,25 @@ def wait_for_height(rpc_port, height, timeout=180):
     raise RuntimeError("timed out waiting for regtest height {}".format(height))
 
 
-def generate_blocks(rpc_port, address, blocks):
+def generate_blocks_timeout(blocks):
+    """Return the client-side HTTP budget for a "generateblocks" request.
+
+    The budget scales with the number of blocks asked for, since that is what the daemon
+    has to do before it answers. GENERATE_BLOCKS_TIMEOUT_ENV overrides the per-block
+    figure; a malformed override is reported and ignored rather than aborting the run.
+    """
+    per_block = GENERATE_BLOCKS_TIMEOUT_PER_BLOCK
+    override = os.environ.get(GENERATE_BLOCKS_TIMEOUT_ENV)
+    if override is not None:
+        try:
+            per_block = float(override)
+        except ValueError:
+            print("Ignoring malformed {}={}".format(GENERATE_BLOCKS_TIMEOUT_ENV, override))
+            sys.stdout.flush()
+    return per_block * blocks
+
+
+def generate_blocks(rpc_port, address, blocks, timeout=RPC_TIMEOUT):
     response = rpc_json(
         rpc_port,
         "/json_rpc",
@@ -113,10 +149,78 @@ def generate_blocks(rpc_port, address, blocks):
                 "amount_of_blocks": blocks,
             },
         },
+        timeout=timeout,
     )
     if "error" in response:
         raise RuntimeError("generateblocks failed: {}".format(response["error"]))
     return response
+
+
+def read_height(rpc_port, deadline):
+    """Read the regtest height, retrying transient client-side failures until deadline.
+
+    /get_height is a cheap call, so a failure here is a contended host rather than a
+    broken daemon; only the overall deadline turns it into a hard error.
+    """
+    while True:
+        try:
+            return get_height(rpc_port)
+        except (TimeoutError, urllib.error.URLError, OSError, KeyError) as e:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("failed to read regtest height: {}".format(e))
+            print("Failed to read regtest height, retrying: {}".format(e))
+            sys.stdout.flush()
+            time.sleep(0.5)
+
+
+def settle_height(rpc_port, deadline, quiet_seconds=3.0):
+    """Return the regtest height once it has stopped advancing.
+
+    Called after a block-generation request gave up client-side: the daemon carries on
+    adding the blocks it was already asked for, so waiting for the chain to go quiet
+    before the next request is issued keeps the recovery path from asking again for
+    blocks that are already on their way.
+    """
+    height = read_height(rpc_port, deadline)
+    unchanged_since = time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(0.5)
+        current_height = read_height(rpc_port, deadline)
+        if current_height != height:
+            height = current_height
+            unchanged_since = time.monotonic()
+        elif time.monotonic() - unchanged_since >= quiet_seconds:
+            break
+    return height
+
+
+def mine_to_height(rpc_port, address, target_height, deadline):
+    """Grow the regtest chain to target_height in chunks, driven by the daemon's height.
+
+    Every iteration re-reads the height the daemon reports and asks only for the blocks
+    that are genuinely still missing. That makes a client-side HTTP timeout non-fatal and
+    keeps blocks from being over-generated: monerod keeps adding the blocks it was asked
+    for after urllib gives up, so the next iteration simply observes the higher chain and
+    requests less. The single overall deadline is what still fails a wedged daemon loudly.
+    """
+    height = read_height(rpc_port, deadline)
+    while height < target_height:
+        blocks = min(GENERATE_BLOCKS_CHUNK, target_height - height)
+        try:
+            generate_blocks(rpc_port, address, blocks, timeout=generate_blocks_timeout(blocks))
+            height = read_height(rpc_port, deadline)
+        except (TimeoutError, urllib.error.URLError, OSError) as e:
+            # Client-side give-up only; the request itself is very likely still being
+            # served, so recover from the height rather than failing the run.
+            print("generateblocks({}) gave up client-side at height {}: {}".format(blocks, height, e))
+            sys.stdout.flush()
+            height = settle_height(rpc_port, deadline)
+            print("Regtest height after recovery: {}/{}".format(height, target_height))
+            sys.stdout.flush()
+        if height < target_height and time.monotonic() >= deadline:
+            raise RuntimeError(
+                "timed out mining regtest blocks: reached height {} of {}".format(height, target_height))
+    return height
 
 
 def pulse_blocks(stop_event, rpc_port, address):
@@ -229,11 +333,19 @@ def main():
         )
         miner_address = generated_values["miner_address"].strip()
         pulse_miner_address = generated_values["pulse_miner_address"].strip()
-        response = generate_blocks(rpc_port, miner_address, MINED_BLOCKS)
-        print("Generated regtest blocks to {}: {}".format(miner_address, response))
-        print("Current regtest height: {}".format(get_height(rpc_port)))
+        # Mine the initial chain relative to the height the daemon reports, under one
+        # overall deadline, so the step is bounded by the daemon's progress and not by
+        # any single HTTP request completing.
+        mining_deadline = time.monotonic() + MINING_TIMEOUT
+        start_height = read_height(rpc_port, mining_deadline)
+        target_height = start_height + MINED_BLOCKS
+        print("Generating {} regtest blocks to {}: height {} -> {}".format(
+            MINED_BLOCKS, miner_address, start_height, target_height))
         sys.stdout.flush()
-        wait_for_height(rpc_port, MINED_BLOCKS)
+        height = mine_to_height(rpc_port, miner_address, target_height, mining_deadline)
+        print("Current regtest height: {}".format(height))
+        sys.stdout.flush()
+        wait_for_height(rpc_port, target_height)
 
         env.setdefault("GTEST_COLOR", "yes")
         gtest_filter = env.get("LIBWALLET_API_TESTS_GTEST_FILTER", "*")

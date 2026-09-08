@@ -185,6 +185,49 @@ namespace
         entry.suggested_confirmations_threshold = std::max(entry.suggested_confirmations_threshold, (unlock_time - now + DIFFICULTY_TARGET_V2 - 1) / DIFFICULTY_TARGET_V2);
     }
   }
+  //------------------------------------------------------------------------------------------------------------------------------
+  // Single acceptance predicate for the RPC 'filename' field, shared by create_wallet, open_wallet,
+  // generate_from_keys and restore_deterministic_wallet. Returns true when the name may be used as a
+  // wallet name inside --wallet-dir; otherwise fills 'er' and returns false.
+  //
+  // Why each rule exists:
+  //  - Path separators ('/' always, plus '\\' and ':' on Windows) would let the caller escape the
+  //    directory the operator dedicated to newly created wallets with --wallet-dir, so a name carrying
+  //    one is refused. This is the long-standing rule; it is applied over the whole std::string here
+  //    (std::string::find rather than a C-string scan) so that a name of the form "ok\0../escape"
+  //    cannot hide a separator behind an embedded NUL.
+  //  - An embedded NUL is carried intact by std::string through the JSON-RPC layer but terminates the
+  //    path at the OS boundary, where every name wallet2 derives from it (keys, cache, mms) truncates
+  //    onto the same shorter path. The keys write, the cache write and the existence check then all
+  //    address one file and the cache write overwrites the key material, reporting success while
+  //    leaving a wallet that cannot be opened under either spelling. Refusing the name protects the
+  //    keys file.
+  //  - An empty name makes wallet2 build a wallet that is never written to disk, so where the server
+  //    is the only holder of the generated seed the caller is told a wallet was created that it can
+  //    never reopen. Handlers that generate their own seed pass require_name = true; the restore and
+  //    generate handlers, where the caller supplies the seed or the keys and an unnamed wallet is a
+  //    documented in-memory-only wallet, pass false.
+  bool validate_wallet_filename(const std::string &filename, bool require_name, epee::json_rpc::error &er)
+  {
+    bool valid = filename.find('/') == std::string::npos;
+#ifdef _WIN32
+    if (valid)
+      valid = filename.find('\\') == std::string::npos;
+    if (valid)
+      valid = filename.find(':') == std::string::npos;
+#endif
+    if (valid)
+      valid = filename.find('\0') == std::string::npos;
+    if (valid && require_name)
+      valid = !filename.empty();
+    if (!valid)
+    {
+      er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
+      er.message = "Invalid filename";
+      return false;
+    }
+    return true;
+  }
 }
 
 namespace tools
@@ -3608,19 +3651,8 @@ namespace tools
 
     namespace po = boost::program_options;
     po::variables_map vm2;
-    const char *ptr = strchr(req.filename.c_str(), '/');
-#ifdef _WIN32
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), '\\');
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), ':');
-#endif
-    if (ptr)
-    {
-      er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = "Invalid filename";
+    if (!validate_wallet_filename(req.filename, true /*require_name*/, er))
       return false;
-    }
     std::string wallet_file = req.filename.empty() ? "" : (m_wallet_dir + "/" + req.filename);
     {
       if (!crypto::ElectrumWords::is_valid_language(req.language))
@@ -3706,19 +3738,8 @@ namespace tools
 
     namespace po = boost::program_options;
     po::variables_map vm2;
-    const char *ptr = strchr(req.filename.c_str(), '/');
-#ifdef _WIN32
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), '\\');
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), ':');
-#endif
-    if (ptr)
-    {
-      er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = "Invalid filename";
+    if (!validate_wallet_filename(req.filename, true /*require_name*/, er))
       return false;
-    }
     if (m_wallet && req.autosave_current)
     {
       try
@@ -3932,19 +3953,8 @@ namespace tools
 
     namespace po = boost::program_options;
     po::variables_map vm2;
-    const char *ptr = strchr(req.filename.c_str(), '/');
-  #ifdef _WIN32
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), '\\');
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), ':');
-  #endif
-    if (ptr)
-    {
-      er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = "Invalid filename";
+    if (!validate_wallet_filename(req.filename, false /*require_name*/, er))
       return false;
-    }
     std::string wallet_file = req.filename.empty() ? "" : (m_wallet_dir + "/" + req.filename);
     // check if wallet file already exists
     if (!wallet_file.empty())
@@ -4122,19 +4132,8 @@ namespace tools
 
     namespace po = boost::program_options;
     po::variables_map vm2;
-    const char *ptr = strchr(req.filename.c_str(), '/');
-  #ifdef _WIN32
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), '\\');
-    if (!ptr)
-      ptr = strchr(req.filename.c_str(), ':');
-  #endif
-    if (ptr)
-    {
-      er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
-      er.message = "Invalid filename";
+    if (!validate_wallet_filename(req.filename, false /*require_name*/, er))
       return false;
-    }
     std::string wallet_file = req.filename.empty() ? "" : (m_wallet_dir + "/" + req.filename);
     // check if wallet file already exists
     if (!wallet_file.empty())

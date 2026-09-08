@@ -115,6 +115,21 @@ if ( LibUSB_FOUND )
         find_library(LIBUDEV_LIBRARY udev)
         if(LIBUDEV_LIBRARY)
             set(LibUSB_LIBRARIES "${LibUSB_LIBRARIES};${LIBUDEV_LIBRARY}")
+        elseif(NOT ANDROID AND "${PKGCONFIG_LIBUSB_STATIC_LIBRARIES}" MATCHES "(^|;)udev(;|$)")
+            # The libusb found here declares udev among its private static link
+            # dependencies, so the archive we are about to link contains its udev
+            # backend (linux_udev.o). Without -ludev on the link line, every
+            # executable that links libusb fails at the very end of the build with
+            # "undefined reference to udev_device_get_action@@LIBUDEV_183" - a
+            # warning here would only defer that failure to link time, once the
+            # whole tree has already been compiled. Fail at configure time instead.
+            message(FATAL_ERROR "libudev library not found, but the libusb this build links statically "
+                "declares udev among its private dependencies (pkg-config libusb-1.0 static libraries: "
+                "${PKGCONFIG_LIBUSB_STATIC_LIBRARIES}). Linking would fail with undefined references to "
+                "udev_device_* symbols. Install the udev development package - libudev-dev "
+                "(Debian/Ubuntu), systemd-devel (Fedora), eudev-libudev-devel (Void) or systemd-libs "
+                "(Arch) - or, if the local libusb was built without the udev backend, point the build at "
+                "the library explicitly with -DLIBUDEV_LIBRARY=<path to libudev>.")
         else()
             message(WARNING "libudev library not found, binaries may fail to link.")
         endif()

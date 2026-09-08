@@ -21,7 +21,7 @@ Monero is now compiled with C++23 by default. If you are getting Trezor compilat
 To fix this try installing protobuf from sources:
 
 ```shell
-git clone --recursive git@github.com:protocolbuffers/protobuf.git
+git clone --recursive https://github.com/protocolbuffers/protobuf.git
 cd protobuf
 cmake -DABSL_PROPAGATE_CXX_STD=TRUE -DCMAKE_CXX_STANDARD=23 -Dprotobuf_BUILD_SHARED_LIBS=ON -Dprotobuf_BUILD_TESTS=OFF .
 cmake --build .

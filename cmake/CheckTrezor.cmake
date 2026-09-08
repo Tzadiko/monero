@@ -138,6 +138,18 @@ if(Protobuf_FOUND AND USE_DEVICE_TREZOR)
     endforeach ()
 
     set(_proto_out_dir "${CMAKE_CURRENT_LIST_DIR}/../src/device_trezor/trezor/messages")
+
+    # protoc fails instead of creating its output directory, and that directory
+    # holds nothing but generated code, so Git carries it only through the
+    # placeholder tracked inside it. Any packaging that drops the placeholder --
+    # an archiver that copies tracked files and honours the `.git* export-ignore`
+    # rule in .gitattributes loses a directory whose only tracked file is a
+    # dot-git one -- would otherwise turn this into a configure failure. Create
+    # it here so message generation does not depend on how the tree was
+    # delivered; on a normal checkout the directory already exists and this is a
+    # no-op.
+    file(MAKE_DIRECTORY "${_proto_out_dir}")
+
     execute_process(COMMAND ${Protobuf_PROTOC_EXECUTABLE} --cpp_out "${_proto_out_dir}" "-I${_proto_include_dir}" ${_proto_files_absolute} RESULT_VARIABLE RET OUTPUT_VARIABLE OUT ERROR_VARIABLE ERR)
     if(RET)
         trezor_fatal_msg("Trezor: protobuf messages could not be (re)generated (err=${RET}). OUT: ${OUT}, ERR: ${ERR}.")

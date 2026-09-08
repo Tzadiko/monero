@@ -249,6 +249,17 @@ class MiningTest():
             assert res.height == height + i + 1
             assert res.hash == block_hash
 
+        # a block the daemon already has must be refused rather than reported as accepted, so that
+        # a caller can tell how many of the blocks it submitted were actually added to the chain
+        for block in blocks:
+            ok = False
+            try: daemon.submitblock(block)
+            except: ok = True
+            assert ok
+        res = daemon.get_height()
+        assert res.height == height + len(hashes)
+        assert res.hash == hashes[-1]
+
     def is_mining_silent(self):
         return 'MINING_SILENT' in os.environ and os.environ['MINING_SILENT'] != "0"
 
@@ -339,7 +350,10 @@ class MiningTest():
         res = daemon.getblocktemplate(address)
         assert first_seed_hash == res.seed_hash
         t0 = time.time()
-        for h in range(len(block_hashes)):
+        # block 0 is the genesis block, which pop_blocks() cannot remove: it is still in the chain,
+        # so submitting it would be a duplicate submission, which submit_block refuses. Feed back
+        # only the blocks that were actually popped.
+        for h in range(1, len(block_hashes)):
             res = daemon.submitblock(blocks[h])
             submitted_block_id = res.block_id
             assert_non_null_hash(submitted_block_id)

@@ -118,6 +118,7 @@ int main(int argc, char* argv[])
   command_line::add_arg(desc_cmd_sett, arg_dry_run);
   command_line::add_arg(desc_cmd_sett, arg_input);
   command_line::add_arg(desc_cmd_only, command_line::arg_help);
+  command_line::add_arg(desc_cmd_only, command_line::arg_version);
 
   po::options_description desc_options("Allowed options");
   desc_options.add(desc_cmd_only).add(desc_cmd_sett);
@@ -137,7 +138,13 @@ int main(int argc, char* argv[])
   {
     std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL << ENDL;
     std::cout << desc_options << std::endl;
-    return 1;
+    return 0;
+  }
+
+  if (command_line::get_arg(vm, command_line::arg_version))
+  {
+    std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL;
+    return 0;
   }
 
   mlog_configure(mlog_get_default_log_path("monero-blockchain-prune-known-spent-data.log"), true);
@@ -170,7 +177,11 @@ int main(int argc, char* argv[])
 
   try
   {
-    db->open(filename, 0);
+    // A dry run must leave the database file provably untouched, as the read only
+    // sibling utilities do. Opening the environment read/write rewrites it (LMDB
+    // meta pages) even when no data is pruned, and the batch below commits a write
+    // transaction, so both are skipped when only reporting.
+    db->open(filename, opt_dry_run ? DBF_RDONLY : 0);
   }
   catch (const std::exception& e)
   {
@@ -234,7 +245,9 @@ int main(int argc, char* argv[])
     stop_requested = true;
   });
 
-  db->batch_start();
+  // nothing may be committed while the environment is open read only (dry run)
+  if (!opt_dry_run)
+    db->batch_start();
 
   size_t num_total_outputs = 0, num_prunable_outputs = 0, num_known_spent_outputs = 0, num_eligible_outputs = 0, num_eligible_known_spent_outputs = 0;
   for (auto i = known_spent_outputs.begin(); i != known_spent_outputs.end(); ++i)
@@ -266,7 +279,9 @@ int main(int argc, char* argv[])
     num_prunable_outputs += i->second;
   }
 
-  db->batch_stop();
+  // no batch was started in a dry run, so there is nothing to commit
+  if (!opt_dry_run)
+    db->batch_stop();
 
   MINFO("Total outputs: " << num_total_outputs);
   MINFO("Known spent outputs: " << num_known_spent_outputs);

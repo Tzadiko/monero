@@ -560,6 +560,24 @@ namespace tools
 #endif
   }
 
+  /*!
+   * \brief Reports whether the filesystem path given is backed by a rotational disk.
+   *
+   * The probe takes a filesystem path, not a device node: it stats the path and
+   * reads the `rotational` queue attribute of the block device the path lives
+   * on, falling back to the parent device when the path sits on a partition.
+   * An empty optional means "could not tell": the path could not be stat'ed,
+   * the device exposes no rotational attribute (which is the normal case for
+   * pseudo-filesystems, overlay mounts and many virtualised block devices), or
+   * the attribute could not be read. Each of those outcomes is logged at debug
+   * level, because the difference between them is what a caller (or a
+   * developer configuring `MONERO_TEST_DEVICE_HDD` / `MONERO_TEST_DEVICE_SSD`
+   * for the `is_hdd` unit tests, documented in
+   * docs/COMPILING_DEBUGGING_TESTING.md) needs in order to act on the result.
+   *
+   * \return true for a rotational disk, false for a non-rotational one, and an
+   *         empty optional when the kind of device could not be determined.
+   */
   boost::optional<bool> is_hdd(const char *file_path)
   {
 #ifdef __GLIBC__
@@ -573,6 +591,7 @@ namespace tools
     }
     else
     {
+      MDEBUG("is_hdd: cannot stat " << file_path << ": " << strerror(errno) << " - device kind unknown");
       return boost::none;
     }
     std::string attr_path = prefix + "/queue/rotational";
@@ -583,6 +602,7 @@ namespace tools
       f.open(attr_path, std::ios_base::in);
       if(not f.is_open())
       {
+          MDEBUG("is_hdd: no rotational attribute for " << file_path << " at " << prefix << "/queue/rotational or " << attr_path << " - device kind unknown");
           return boost::none;
       }
     }
@@ -592,6 +612,7 @@ namespace tools
     {
       return (val == 1);
     }
+    MDEBUG("is_hdd: cannot read rotational attribute " << attr_path << " for " << file_path << " - device kind unknown");
     return boost::none;
 #else
     return boost::none;

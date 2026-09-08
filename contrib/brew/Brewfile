@@ -20,6 +20,7 @@ brew "ccache"
 brew "rust"
 brew "doxygen"
 brew "graphviz"
-brew "libunwind-headers"
+# no libunwind: macOS builds never take the libunwind stack-trace path (CMakeLists.txt
+# disables it for APPLE), and Homebrew deprecated libunwind-headers as unmaintained
 brew "protobuf"
 brew "libusb"

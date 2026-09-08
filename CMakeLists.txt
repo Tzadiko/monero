@@ -52,6 +52,20 @@ if (POLICY CMP0179)
     cmake_policy(SET CMP0179 NEW)
 endif()
 
+# Let find_package() consult the upper-case BOOST_ROOT variable. That is the
+# spelling contrib/depends/toolchain.cmake.in uses to point the cross builds at
+# the depends prefix, and the spelling the documented recipe for building
+# against a Boost other than the system one uses (see
+# docs/COMPILING_DEBUGGING_TESTING.md, "Toolchain requirements"). Without this,
+# at our cmake_minimum_required floor the policy is unset, find_package ignores
+# BOOST_ROOT and CMake emits a developer warning for every Boost lookup. The
+# guard is needed because CMP0144 only exists from CMake 3.27, while the floor
+# is 3.25; on 3.25 and 3.26 the case-preserved Boost_ROOT mirror set up in the
+# Boost discovery block below carries the same prefix instead.
+if (POLICY CMP0144)
+    cmake_policy(SET CMP0144 NEW)
+endif()
+
 if (IOS)
     INCLUDE(CmakeLists_IOS.txt)
 endif()
@@ -169,6 +183,78 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
 else()
   message(FATAL_ERROR "Unsupported C++ compiler '${CMAKE_CXX_COMPILER_ID}' (version ${CMAKE_CXX_COMPILER_VERSION}); this repository is built as C++23 and requires GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 (Xcode 15) or newer (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
 endif()
+
+# Enforce the Rust/cargo build prerequisite. Rust is not an optional feature of
+# this tree: src/fcmp_pp/fcmp_pp_rust is added unconditionally (src/CMakeLists.txt
+# -> src/fcmp_pp/CMakeLists.txt) and the archive cargo produces is linked into
+# fcmp_pp, hence into every executable. Resolving the two programs here reports a
+# missing toolchain while CMake is still configuring, and by name, instead of
+# letting the build reach cargo's custom command minutes later and fail with a
+# bare "no such file or directory" that names neither cargo nor Rust.
+# docs/COMPILING_DEBUGGING_TESTING.md ("Rust") carries the prose form of this
+# requirement, exactly as the compiler-floor guard above points at that document.
+#
+# The guard checks presence and usability; it deliberately asserts no version
+# floor. src/fcmp_pp/fcmp_pp_rust/Cargo.toml declares no `rust-version`, so the
+# repository states no minimum supported Rust version and a comparison here would
+# invent a requirement. Usability is probed by running each program because a
+# rustup shim can sit on PATH with no toolchain installed behind it, and because a
+# cached path goes stale when a toolchain is moved, removed or reinstalled.
+set(RUST_PREREQUISITE_HELP
+    "Rust and cargo are a mandatory build prerequisite of this repository: src/fcmp_pp/fcmp_pp_rust is built unconditionally and its static library is linked into every executable, so no target can be built without a working Rust toolchain.\n"
+    "Install one with rustup (https://rustup.rs), which is how CI installs it, or from your distribution's rust/cargo package, and have cargo and rustc on PATH before configuring. "
+    "A toolchain that is installed outside PATH can be pointed at explicitly with -DCARGO_EXECUTABLE=/path/to/cargo and -DRUSTC_EXECUTABLE=/path/to/rustc.\n"
+    "See docs/COMPILING_DEBUGGING_TESTING.md, section \"Rust\".")
+
+# No REQUIRED here: its stock "Could NOT find CARGO_EXECUTABLE" says nothing
+# about what cargo is needed for or how to install it. Both are cache variables,
+# so -DCARGO_EXECUTABLE=/path/to/cargo overrides the search.
+find_program(CARGO_EXECUTABLE NAMES cargo DOC "Path to the cargo build tool that builds src/fcmp_pp/fcmp_pp_rust")
+find_program(RUSTC_EXECUTABLE NAMES rustc DOC "Path to the Rust compiler that builds src/fcmp_pp/fcmp_pp_rust")
+
+if(NOT CARGO_EXECUTABLE)
+  message(FATAL_ERROR "cargo was not found on PATH or in the default install locations.\n" ${RUST_PREREQUISITE_HELP})
+endif()
+if(NOT RUSTC_EXECUTABLE)
+  message(FATAL_ERROR "rustc was not found on PATH or in the default install locations.\n" ${RUST_PREREQUISITE_HELP})
+endif()
+
+execute_process(COMMAND "${CARGO_EXECUTABLE}" --version
+  OUTPUT_VARIABLE CARGO_VERSION_OUTPUT
+  ERROR_VARIABLE CARGO_VERSION_ERROR
+  RESULT_VARIABLE CARGO_VERSION_RESULT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_STRIP_TRAILING_WHITESPACE)
+# A failed launch reports a message rather than an exit code in RESULT_VARIABLE,
+# so both cases are covered by comparing against the string "0". A launch that
+# never happened also leaves no captured output, hence the placeholder.
+if(NOT CARGO_VERSION_RESULT STREQUAL "0")
+  if(CARGO_VERSION_ERROR STREQUAL "")
+    set(CARGO_VERSION_ERROR "(nothing on standard error)")
+  endif()
+  message(FATAL_ERROR "cargo at '${CARGO_EXECUTABLE}' is present but not usable: '${CARGO_EXECUTABLE} --version' failed with '${CARGO_VERSION_RESULT}' and reported: ${CARGO_VERSION_ERROR}\n" ${RUST_PREREQUISITE_HELP})
+endif()
+
+execute_process(COMMAND "${RUSTC_EXECUTABLE}" --version
+  OUTPUT_VARIABLE RUSTC_VERSION_OUTPUT
+  ERROR_VARIABLE RUSTC_VERSION_ERROR
+  RESULT_VARIABLE RUSTC_VERSION_RESULT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_STRIP_TRAILING_WHITESPACE)
+if(NOT RUSTC_VERSION_RESULT STREQUAL "0")
+  if(RUSTC_VERSION_ERROR STREQUAL "")
+    set(RUSTC_VERSION_ERROR "(nothing on standard error)")
+  endif()
+  message(FATAL_ERROR "rustc at '${RUSTC_EXECUTABLE}' is present but not usable: '${RUSTC_EXECUTABLE} --version' failed with '${RUSTC_VERSION_RESULT}' and reported: ${RUSTC_VERSION_ERROR}\n" ${RUST_PREREQUISITE_HELP})
+endif()
+
+# Report the toolchain that was actually resolved, so the configure log records
+# it instead of only the Rust target that src/fcmp_pp/fcmp_pp_rust derives. Both
+# programs answer --version on a single line; only that line is reported.
+string(REGEX REPLACE "[\r\n].*" "" CARGO_VERSION_OUTPUT "${CARGO_VERSION_OUTPUT}")
+string(REGEX REPLACE "[\r\n].*" "" RUSTC_VERSION_OUTPUT "${RUSTC_VERSION_OUTPUT}")
+message(STATUS "Found Cargo: ${CARGO_EXECUTABLE} (${CARGO_VERSION_OUTPUT})")
+message(STATUS "Found Rust compiler: ${RUSTC_EXECUTABLE} (${RUSTC_VERSION_OUTPUT})")
 
 function (add_c_flag_if_supported flag var)
   # Prepending the flag with -Werror will only add the flag,
@@ -961,7 +1047,43 @@ endif()
 
 # Find Boost headers
 set(BOOST_MIN_VER 1.69)
-find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED CONFIG)
+
+# Both lookups below run in CONFIG mode: they consume a BoostConfig.cmake out of
+# a prefix rather than going through the deprecated FindBoost module. The two
+# ways this build is pointed at a Boost other than the system one are spelled in
+# FindBoost's vocabulary, so each has to be translated for CONFIG mode once,
+# here, or it is silently ignored.
+#
+# BOOST_ROOT is an upper-case <PACKAGENAME>_ROOT variable, which find_package()
+# consults only under policy CMP0144 - set NEW near the top of this file where
+# the policy exists. Mirroring it onto the case-preserved Boost_ROOT, honoured
+# since CMake 3.12 through CMP0074, makes the named prefix take effect on every
+# CMake version this project supports, including 3.25 and 3.26 where CMP0144
+# does not exist yet.
+if (NOT DEFINED Boost_ROOT)
+  if (DEFINED BOOST_ROOT)
+    set(Boost_ROOT "${BOOST_ROOT}")
+  elseif (DEFINED ENV{BOOST_ROOT})
+    set(Boost_ROOT "$ENV{BOOST_ROOT}")
+  endif()
+endif()
+
+# Boost_NO_SYSTEM_PATHS - set directly, or through the BOOST_IGNORE_SYSTEM_PATHS
+# option above, or by contrib/depends/toolchain.cmake.in for the cross builds -
+# is a FindBoost module variable that a CONFIG-mode lookup never reads. Translate
+# it into the equivalent find_package() arguments, so that a request for a
+# non-system Boost is honoured, and fails loudly when no Boost is present at the
+# named prefix, instead of quietly resolving to the system one.
+set(BOOST_FIND_PATH_OPTIONS "")
+if (Boost_NO_SYSTEM_PATHS)
+  set(BOOST_FIND_PATH_OPTIONS NO_CMAKE_SYSTEM_PATH NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_INSTALL_PREFIX)
+  message(STATUS "Boost: ignoring system paths")
+endif()
+if (Boost_ROOT)
+  message(STATUS "Boost prefix: ${Boost_ROOT}")
+endif()
+
+find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED CONFIG ${BOOST_FIND_PATH_OPTIONS})
 
 if(NOT Boost_FOUND)
   message(FATAL_ERROR "Could not find Boost libraries, please make sure you have installed Boost or libboost-all-dev (>=${BOOST_MIN_VER}) or the equivalent")
@@ -981,7 +1103,7 @@ elseif(Boost_FOUND)
   message(STATUS "Boost components: ${BOOST_COMPONENTS}")
 
   # Find required Boost libraries
-  find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG)
+  find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG ${BOOST_FIND_PATH_OPTIONS})
 endif()
 
 add_definitions(-DBOOST_ASIO_ENABLE_SEQUENTIAL_STRAND_ALLOCATION)

@@ -30,6 +30,7 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import time
+import util_resources
 
 """Test daemon P2P
 """
@@ -337,7 +338,10 @@ class P2PTest():
         wallet = Wallet()
         try: wallet.close_wallet()
         except: pass
-        wallet.create_wallet()
+        # create_wallet requires a name it can actually write, and the wallet directory outlives a
+        # single run, so clear the files of that name first (create_wallet fails with -21 otherwise)
+        util_resources.remove_wallet_files('test_p2p_bench')
+        wallet.create_wallet(filename = 'test_p2p_bench')
         wallet.auto_refresh(enable = False)
         wallet.set_daemon(daemon2_address)
         assert wallet.get_transfers() == {}
