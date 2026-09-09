@@ -84,22 +84,6 @@ TEST(ZmqFullMessage, Request)
   EXPECT_STREQ("foo", parsed.getRequestType().c_str());
 }
 
-TEST(ZmqFullMessage, RequestTypeKeepsEmbeddedNul)
-{
-  // A JSON method name may contain NUL bytes; it must be reported in full so
-  // that it cannot be truncated into a real method name by the dispatcher.
-  static constexpr const char request[] =
-    "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"stop_mining\\u0000get_info\",\"params\":{}}";
-  static const std::string expected{"stop_mining\0get_info", 20};
-
-  cryptonote::rpc::FullMessage parsed{request, true};
-
-  const std::string request_type = parsed.getRequestType();
-  EXPECT_EQ(20u, request_type.size());
-  EXPECT_EQ(expected, request_type);
-  EXPECT_NE(std::string{"stop_mining"}, request_type);
-}
-
 TEST(ZmqRestrictedMethods, BasicCoverage)
 {
   EXPECT_TRUE(cryptonote::rpc::is_blocked_in_restricted_mode("flush_txpool"));

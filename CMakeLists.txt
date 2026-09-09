@@ -52,20 +52,6 @@ if (POLICY CMP0179)
     cmake_policy(SET CMP0179 NEW)
 endif()
 
-# Let find_package() consult the upper-case BOOST_ROOT variable. That is the
-# spelling contrib/depends/toolchain.cmake.in uses to point the cross builds at
-# the depends prefix, and the spelling the documented recipe for building
-# against a Boost other than the system one uses (see
-# docs/COMPILING_DEBUGGING_TESTING.md, "Toolchain requirements"). Without this,
-# at our cmake_minimum_required floor the policy is unset, find_package ignores
-# BOOST_ROOT and CMake emits a developer warning for every Boost lookup. The
-# guard is needed because CMP0144 only exists from CMake 3.27, while the floor
-# is 3.25; on 3.25 and 3.26 the case-preserved Boost_ROOT mirror set up in the
-# Boost discovery block below carries the same prefix instead.
-if (POLICY CMP0144)
-    cmake_policy(SET CMP0144 NEW)
-endif()
-
 if (IOS)
     INCLUDE(CmakeLists_IOS.txt)
 endif()
@@ -183,78 +169,6 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
 else()
   message(FATAL_ERROR "Unsupported C++ compiler '${CMAKE_CXX_COMPILER_ID}' (version ${CMAKE_CXX_COMPILER_VERSION}); this repository is built as C++23 and requires GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 (Xcode 15) or newer (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
 endif()
-
-# Enforce the Rust/cargo build prerequisite. Rust is not an optional feature of
-# this tree: src/fcmp_pp/fcmp_pp_rust is added unconditionally (src/CMakeLists.txt
-# -> src/fcmp_pp/CMakeLists.txt) and the archive cargo produces is linked into
-# fcmp_pp, hence into every executable. Resolving the two programs here reports a
-# missing toolchain while CMake is still configuring, and by name, instead of
-# letting the build reach cargo's custom command minutes later and fail with a
-# bare "no such file or directory" that names neither cargo nor Rust.
-# docs/COMPILING_DEBUGGING_TESTING.md ("Rust") carries the prose form of this
-# requirement, exactly as the compiler-floor guard above points at that document.
-#
-# The guard checks presence and usability; it deliberately asserts no version
-# floor. src/fcmp_pp/fcmp_pp_rust/Cargo.toml declares no `rust-version`, so the
-# repository states no minimum supported Rust version and a comparison here would
-# invent a requirement. Usability is probed by running each program because a
-# rustup shim can sit on PATH with no toolchain installed behind it, and because a
-# cached path goes stale when a toolchain is moved, removed or reinstalled.
-set(RUST_PREREQUISITE_HELP
-    "Rust and cargo are a mandatory build prerequisite of this repository: src/fcmp_pp/fcmp_pp_rust is built unconditionally and its static library is linked into every executable, so no target can be built without a working Rust toolchain.\n"
-    "Install one with rustup (https://rustup.rs), which is how CI installs it, or from your distribution's rust/cargo package, and have cargo and rustc on PATH before configuring. "
-    "A toolchain that is installed outside PATH can be pointed at explicitly with -DCARGO_EXECUTABLE=/path/to/cargo and -DRUSTC_EXECUTABLE=/path/to/rustc.\n"
-    "See docs/COMPILING_DEBUGGING_TESTING.md, section \"Rust\".")
-
-# No REQUIRED here: its stock "Could NOT find CARGO_EXECUTABLE" says nothing
-# about what cargo is needed for or how to install it. Both are cache variables,
-# so -DCARGO_EXECUTABLE=/path/to/cargo overrides the search.
-find_program(CARGO_EXECUTABLE NAMES cargo DOC "Path to the cargo build tool that builds src/fcmp_pp/fcmp_pp_rust")
-find_program(RUSTC_EXECUTABLE NAMES rustc DOC "Path to the Rust compiler that builds src/fcmp_pp/fcmp_pp_rust")
-
-if(NOT CARGO_EXECUTABLE)
-  message(FATAL_ERROR "cargo was not found on PATH or in the default install locations.\n" ${RUST_PREREQUISITE_HELP})
-endif()
-if(NOT RUSTC_EXECUTABLE)
-  message(FATAL_ERROR "rustc was not found on PATH or in the default install locations.\n" ${RUST_PREREQUISITE_HELP})
-endif()
-
-execute_process(COMMAND "${CARGO_EXECUTABLE}" --version
-  OUTPUT_VARIABLE CARGO_VERSION_OUTPUT
-  ERROR_VARIABLE CARGO_VERSION_ERROR
-  RESULT_VARIABLE CARGO_VERSION_RESULT
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_STRIP_TRAILING_WHITESPACE)
-# A failed launch reports a message rather than an exit code in RESULT_VARIABLE,
-# so both cases are covered by comparing against the string "0". A launch that
-# never happened also leaves no captured output, hence the placeholder.
-if(NOT CARGO_VERSION_RESULT STREQUAL "0")
-  if(CARGO_VERSION_ERROR STREQUAL "")
-    set(CARGO_VERSION_ERROR "(nothing on standard error)")
-  endif()
-  message(FATAL_ERROR "cargo at '${CARGO_EXECUTABLE}' is present but not usable: '${CARGO_EXECUTABLE} --version' failed with '${CARGO_VERSION_RESULT}' and reported: ${CARGO_VERSION_ERROR}\n" ${RUST_PREREQUISITE_HELP})
-endif()
-
-execute_process(COMMAND "${RUSTC_EXECUTABLE}" --version
-  OUTPUT_VARIABLE RUSTC_VERSION_OUTPUT
-  ERROR_VARIABLE RUSTC_VERSION_ERROR
-  RESULT_VARIABLE RUSTC_VERSION_RESULT
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-  ERROR_STRIP_TRAILING_WHITESPACE)
-if(NOT RUSTC_VERSION_RESULT STREQUAL "0")
-  if(RUSTC_VERSION_ERROR STREQUAL "")
-    set(RUSTC_VERSION_ERROR "(nothing on standard error)")
-  endif()
-  message(FATAL_ERROR "rustc at '${RUSTC_EXECUTABLE}' is present but not usable: '${RUSTC_EXECUTABLE} --version' failed with '${RUSTC_VERSION_RESULT}' and reported: ${RUSTC_VERSION_ERROR}\n" ${RUST_PREREQUISITE_HELP})
-endif()
-
-# Report the toolchain that was actually resolved, so the configure log records
-# it instead of only the Rust target that src/fcmp_pp/fcmp_pp_rust derives. Both
-# programs answer --version on a single line; only that line is reported.
-string(REGEX REPLACE "[\r\n].*" "" CARGO_VERSION_OUTPUT "${CARGO_VERSION_OUTPUT}")
-string(REGEX REPLACE "[\r\n].*" "" RUSTC_VERSION_OUTPUT "${RUSTC_VERSION_OUTPUT}")
-message(STATUS "Found Cargo: ${CARGO_EXECUTABLE} (${CARGO_VERSION_OUTPUT})")
-message(STATUS "Found Rust compiler: ${RUSTC_EXECUTABLE} (${RUSTC_VERSION_OUTPUT})")
 
 function (add_c_flag_if_supported flag var)
   # Prepending the flag with -Werror will only add the flag,
@@ -682,23 +596,6 @@ if (APPLE AND NOT IOS)
   endif()
 endif()
 
-# SECURITY / VERSION-CURRENCY NOTE (reviewed 2026-09-08) - SEC4-F15-openssl-floor-eol
-# The floor declared below (1.1.1) is end-of-life, and so is the 3.0 LTS branch.
-# Advisories / EOL: OpenSSL 1.1.1 and 1.0.2 are no longer supported upstream, and
-#   security support for the 3.0 LTS branch ended 2026-09-07; the supported lines are
-#   3.5 (LTS, to 2030-04-08) and the 4.0 series. A forward-looking floor is therefore
-#   >= 3.5, not >= 3.2: 3.2 (EOL Nov 2025), 3.3 (EOL Apr 2026) and 3.4 (EOL Oct 2026)
-#   are already end-of-life or imminently so.
-# Exposure here: this argument is a minimum accepted by find_package, not the version
-#   any artifact links - every verified build configuration links OpenSSL 3.x (the
-#   depends cross-build pins 3.5.7; distribution builds link the platform 3.x). The
-#   residual risk is that a downstream builder can satisfy the declared floor with an
-#   end-of-life TLS stack and still pass configure.
-# Floor retained deliberately: AAP 0.2.2 retains it - OpenSSL is a C library consumed
-#   inside extern "C", so the C++23 language-standard change cannot move its floor - and
-#   this file's own change-set contract lists the find_package line as must-not-change.
-# Maintainer action when the freeze lifts: raise the argument to 3.5 as a separate
-#   dependency-policy change, coordinated with the README and docs dependency tables.
 find_package(OpenSSL 1.1.1 REQUIRED)
 message(STATUS "Using OpenSSL include dir at ${OPENSSL_INCLUDE_DIR}")
 include_directories(${OPENSSL_INCLUDE_DIR})
@@ -919,31 +816,6 @@ include(CheckTrezor)
   endif()
 
   # New in GCC 8.2
-  #
-  # This emits the endbr64 landing pads and the x86 CET property
-  # (GNU_PROPERTY_X86_FEATURE_1_AND, IBT and SHSTK) in every C and C++ object,
-  # but on x86-64 ELF the linker ANDs that property across all inputs, so a
-  # single input without it clears it for the whole output. CET is therefore
-  # compiled in but not advertised in .note.gnu.property on x86-64: of the 13
-  # executables only monero-gen-ssl-cert carries the note, because it alone
-  # pulls in neither an assembler object nor a Rust object. Linking monerod
-  # reports 17 inputs without the property (list them with
-  # -Wl,-z,cet-report=warning): the 14 supercop ed25519 .s objects,
-  # CryptonightR_template.S, RandomX's jit_compiler_x86_static.S, and one
-  # libfcmp_pp_rust.a code-generation unit.
-  #
-  # Passing this flag to those compilations would not change that - gcc emits
-  # no property for assembler input and produces byte-identical objects with
-  # and without it, and -Wa,-mx86-used-note=yes emits only the "ISA used" and
-  # "feature used" notes, never FEATURE_1_AND. Forcing the property at link
-  # time with -Wl,-z,ibt -Wl,-z,shstk would assert a guarantee these binaries
-  # do not meet: cn/r hashing calls JIT-generated code through hp_jitfunc in
-  # src/crypto/slow-hash.c, and RandomX's JIT does the same, with entry points
-  # that carry no endbr64, so an IBT-enforcing loader would fault them.
-  # Advertising CET needs .note.gnu.property in the assembler sources and a
-  # Rust toolchain that emits it; every other hardening property (RELRO,
-  # BIND_NOW, PIE, non-executable stack, stack canaries, fortify) is present
-  # on all 13 binaries.
   if (NOT OPENBSD AND NOT (WIN32 AND (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS 9.1)))
     add_c_flag_if_supported(-fcf-protection=full C_SECURITY_FLAGS)
     add_cxx_flag_if_supported(-fcf-protection=full CXX_SECURITY_FLAGS)
@@ -981,28 +853,6 @@ include(CheckTrezor)
   if (noexecheap_SUPPORTED)
     set(LD_SECURITY_FLAGS "${LD_SECURITY_FLAGS} -Wl,-z,noexecheap")
   endif()
-
-  # Exported-symbol surface of the executables. Nothing here restricts symbol
-  # visibility, so an executable exports the vague-linkage entities it has to
-  # share with the shared libraries it links: monerod exports 103 dynamic
-  # symbols: 73 typeinfo/vtable objects, 24 weak function instantiations,
-  # 4 Boost singletons (the error-category holders and Boost.Serialization's
-  # singleton lock), epee's mtrace logging helper and the C runtime's
-  # _IO_stdin_used marker.
-  #
-  # Building as C++23 rather than C++17 adds 23 symbols across the 13
-  # executables and removes none. All 23 are weak std::__cxx11::basic_string
-  # members and none is first-party: from C++20 onwards libstdc++ suppresses
-  # its own "extern template class basic_string<char>" instantiation
-  # declaration (bits/basic_string.tcc), so each translation unit instantiates
-  # the string members it uses instead of importing them from libstdc++.so.
-  # -fvisibility=hidden does not hide them, because libstdc++ gives its own
-  # entities default visibility; -fvisibility-inlines-hidden does, but it also
-  # hides the typeinfos, vtables and function-local statics listed above, which
-  # the executables and the Boost and libstdc++ shared libraries must resolve
-  # to one definition for exception matching and singleton identity. Pinning
-  # this surface therefore belongs in a linker version script that enumerates
-  # what may be exported, rather than in a global visibility switch.
 
   # some windows linker bits
   if (WIN32)
@@ -1111,43 +961,7 @@ endif()
 
 # Find Boost headers
 set(BOOST_MIN_VER 1.69)
-
-# Both lookups below run in CONFIG mode: they consume a BoostConfig.cmake out of
-# a prefix rather than going through the deprecated FindBoost module. The two
-# ways this build is pointed at a Boost other than the system one are spelled in
-# FindBoost's vocabulary, so each has to be translated for CONFIG mode once,
-# here, or it is silently ignored.
-#
-# BOOST_ROOT is an upper-case <PACKAGENAME>_ROOT variable, which find_package()
-# consults only under policy CMP0144 - set NEW near the top of this file where
-# the policy exists. Mirroring it onto the case-preserved Boost_ROOT, honoured
-# since CMake 3.12 through CMP0074, makes the named prefix take effect on every
-# CMake version this project supports, including 3.25 and 3.26 where CMP0144
-# does not exist yet.
-if (NOT DEFINED Boost_ROOT)
-  if (DEFINED BOOST_ROOT)
-    set(Boost_ROOT "${BOOST_ROOT}")
-  elseif (DEFINED ENV{BOOST_ROOT})
-    set(Boost_ROOT "$ENV{BOOST_ROOT}")
-  endif()
-endif()
-
-# Boost_NO_SYSTEM_PATHS - set directly, or through the BOOST_IGNORE_SYSTEM_PATHS
-# option above, or by contrib/depends/toolchain.cmake.in for the cross builds -
-# is a FindBoost module variable that a CONFIG-mode lookup never reads. Translate
-# it into the equivalent find_package() arguments, so that a request for a
-# non-system Boost is honoured, and fails loudly when no Boost is present at the
-# named prefix, instead of quietly resolving to the system one.
-set(BOOST_FIND_PATH_OPTIONS "")
-if (Boost_NO_SYSTEM_PATHS)
-  set(BOOST_FIND_PATH_OPTIONS NO_CMAKE_SYSTEM_PATH NO_SYSTEM_ENVIRONMENT_PATH NO_CMAKE_INSTALL_PREFIX)
-  message(STATUS "Boost: ignoring system paths")
-endif()
-if (Boost_ROOT)
-  message(STATUS "Boost prefix: ${Boost_ROOT}")
-endif()
-
-find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED CONFIG ${BOOST_FIND_PATH_OPTIONS})
+find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED CONFIG)
 
 if(NOT Boost_FOUND)
   message(FATAL_ERROR "Could not find Boost libraries, please make sure you have installed Boost or libboost-all-dev (>=${BOOST_MIN_VER}) or the equivalent")
@@ -1167,7 +981,7 @@ elseif(Boost_FOUND)
   message(STATUS "Boost components: ${BOOST_COMPONENTS}")
 
   # Find required Boost libraries
-  find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG ${BOOST_FIND_PATH_OPTIONS})
+  find_package(Boost ${BOOST_MIN_VER} QUIET REQUIRED COMPONENTS ${BOOST_COMPONENTS} CONFIG)
 endif()
 
 add_definitions(-DBOOST_ASIO_ENABLE_SEQUENTIAL_STRAND_ALLOCATION)

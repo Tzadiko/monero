@@ -110,20 +110,13 @@ namespace epee
     //! Reset write position, but do not release internal memory. \post `size() == 0`.
     void clear() noexcept { next_write_ = buffer_.get(); }
 
-    /*! Copy `length` bytes starting at `ptr` to end of stream. A `length` of
-        zero is valid and copies nothing - `ptr` is then never dereferenced and
-        may be `nullptr` (an empty `span` or `byte_slice` has a `nullptr`
-        `data()`). The zero check is required, not redundant: `std::memcpy`
-        declares both pointer parameters non-null even for a zero count, and an
-        unallocated stream has a `nullptr` `tellp()`, so calling it
-        unconditionally is undefined behavior on an empty write.
+    /*! Copy `length` bytes starting at `ptr` to end of stream.
         \throw std::range_error If exceeding max size_t value.
         \throw std::bad_alloc If allocation fails. */
     void write(const std::uint8_t* ptr, const std::size_t length)
     {
       check(length);
-      if (length)
-        std::memcpy(tellp(), ptr, length);
+      std::memcpy(tellp(), ptr, length);
       next_write_ += length;
     }
 
@@ -179,19 +172,13 @@ namespace epee
       ++next_write_;
     }
 
-    /*! Write `ch` to end of stream `count` times. A `count` of zero is valid
-        and writes nothing. The zero check is required, not redundant:
-        `std::memset` declares its destination non-null even for a zero count,
-        and an unallocated stream has a `nullptr` `tellp()`, so calling it
-        unconditionally is undefined behavior on an empty write (reachable with
-        a zero padding size in `levin::message_writer`).
+    /*! Write `ch` to end of stream `count` times.
         \throw std::range_error if exceeding max `size_t` value.
         \throw std::bad_alloc if allocation fails. */
     void put_n(const std::uint8_t ch, const std::size_t count)
     {
       check(count);
-      if (count)
-        std::memset(tellp(), ch, count);
+      std::memset(tellp(), ch, count);
       next_write_ += count;
     }
 

@@ -1,23 +1,4 @@
 package=openssl
-
-# SECURITY / VERSION-CURRENCY NOTE (reviewed 2026-09-08) - SEC4-F16-depends-openssl-357-cves
-# The 3.5.7 pin below is affected by four CVEs, all fixed in OpenSSL 3.5.8.
-# Advisories (affected from 3.5.0 before 3.5.8; OpenSSL rates the most severe of them
-#   Moderate): CVE-2026-14456 unbounded memory growth in the QUIC server incoming channel
-#   queue; CVE-2026-14457 RFC7250 raw-public-key server signature-algorithm selection can
-#   dereference a missing certificate; CVE-2026-18798 QUIC server double free while
-#   processing an INITIAL packet; CVE-2026-54874 excessive memory use buffering DTLS
-#   records for a future epoch.
-# Exposure here: NOT REACHABLE - monero uses OpenSSL only for TLS through
-#   boost::asio::ssl plus hashing. A dynamic-symbol audit of the built binaries found 252
-#   genuine OpenSSL imports (SSL_CTX_*, EVP_*, X509_*) and zero QUIC, DTLS, OCSP, CMP,
-#   CMS, PKCS#7, PKCS#12 or raw-public-key entry points; this recipe additionally
-#   configures no-dtls1, no-ssl3 and no-sctp below, compiling part of that surface out.
-# Pin frozen deliberately: AAP 0.2.2 freezes every contrib/depends recipe version to
-#   preserve reproducible-build inputs.
-# Maintainer action when the freeze lifts: move the version to 3.5.8 with its new
-#   sha256_hash - 3.5 is the supported LTS branch (to 2030-04-08), so that is a
-#   patch-level move inside the same branch.
 $(package)_version=3.5.7
 $(package)_download_path=https://github.com/openssl/openssl/releases/download/openssl-$($(package)_version)
 $(package)_file_name=$(package)-$($(package)_version).tar.gz

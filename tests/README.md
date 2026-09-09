@@ -9,38 +9,6 @@ make [-jn] debug-test # where n is number of compiler processes
 
 To test a release build, replace `debug-test` with `release-test` in the previous command.
 
-# Test invocation hygiene
-
-Some of these suites, and any ad-hoc harness that drives the built binaries,
-run `monerod`, `monero-wallet-rpc` or the `monero-blockchain-*` utilities
-directly. Those binaries default to the **mainnet** data directory
-(`~/.bitmonero` on Unix) whenever `--data-dir` is absent, and they act on it:
-an invocation the argument parser accepts — including one whose only argument
-is an empty or nonsensical positional value — will create or open a mainnet
-LMDB database there. Unknown *options* are rejected before anything happens,
-but a junk positional argument is not, so a harness that generates arguments
-must still pass the network and data-directory flags on every call:
-
-```bash
-# daemon: never point it at mainnet
-monerod --testnet --offline --no-igd --data-dir /tmp/monero-test-$$ --log-file /tmp/monero-test-$$/monerod.log
-
-# blockchain utilities: --offline is accepted only by monero-blockchain-import,
-# --no-igd by none of them, and monero-blockchain-usage takes --input instead of --data-dir
-monero-blockchain-export --testnet --data-dir /tmp/monero-test-$$
-```
-
-The utilities offer `--log-level` but not `--log-file`, and they write
-`<binary name>.log` next to the executable, so running them out of
-`build/bin` leaves log files there to clean up. The full per-binary flag table,
-and the environment variables individual tests are gated on, are in
-[docs/COMPILING_DEBUGGING_TESTING.md](../docs/COMPILING_DEBUGGING_TESTING.md),
-section "Running tests and binaries locally".
-
-Run test binaries one at a time. Several suites bind fixed loopback ports or
-use fixed paths under the system temporary directory, so two concurrent runs
-interfere with each other; CI never passes `-j` to `ctest` for that reason.
-
 # Core tests
 
 Core tests take longer than any other Monero tests, due to the high amount of computational work involved in validating core components.
@@ -288,20 +256,6 @@ ctest
 ```
 
 To run the same tests on a release build, replace `debug` with `release`.
-
-Invoking the binary directly instead of through CTest works too, but pass the
-build's copy of the test data — `unit_tests --data-dir <build dir>/tests/data`
-— because some wallet cases write into that directory, and CTest itself passes
-the build copy rather than the one in the source tree.
-
-A few cases are gated on environment variables and skip when they are unset,
-which is the correct outcome on a host that cannot satisfy them:
-`MONERO_TEST_DEVICE_HDD` and `MONERO_TEST_DEVICE_SSD` each name a path on
-rotational and non-rotational storage respectively for the `is_hdd` cases. They
-are described in
-[docs/COMPILING_DEBUGGING_TESTING.md](../docs/COMPILING_DEBUGGING_TESTING.md),
-section "Running tests and binaries locally". Export `DNS_PUBLIC=tcp` before a
-run, as CI does, so the DNS-dependent cases do not rely on the local resolver.
 
 # Writing new tests
 

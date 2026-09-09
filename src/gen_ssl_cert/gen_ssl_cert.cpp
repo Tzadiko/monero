@@ -121,33 +121,6 @@ int main(int argc, char* argv[])
     return 1;
   }
 
-  // Both output paths are validated before a key pair is generated, so that a
-  // path this tool cannot safely write to costs nothing and reports precisely
-  // what is wrong with it. path_argument_kind::new_file refuses an existing name
-  // of any kind, a symbolic link included: writing a private key through a link
-  // truncates and replaces whatever the link resolves to (CWE-59), and writing
-  // it over an existing file destroys that file - both silently, and both with
-  // an exit status of success, before this check existed. The write itself uses
-  // the same policy atomically further down, so this check is for the diagnostic
-  // and the early exit, not for the guarantee.
-  std::string path_error;
-  if (!tools::validate_path_argument(arg_certificate_filename.name, certificate_filename, tools::path_argument_kind::new_file, path_error))
-  {
-    tools::fail_msg_writer() << path_error;
-    return 1;
-  }
-  if (!tools::validate_path_argument(arg_private_key_filename.name, private_key_filename, tools::path_argument_kind::new_file, path_error))
-  {
-    tools::fail_msg_writer() << path_error;
-    return 1;
-  }
-  if (certificate_filename == private_key_filename)
-  {
-    tools::fail_msg_writer() << gencert::tr("The certificate and the private key cannot be written to the same file: ")
-      << tools::describe_path_argument(certificate_filename);
-    return 1;
-  }
-
   epee::wipeable_string private_key_passphrase;
   if (command_line::get_arg(vm, arg_prompt_for_passphrase))
   {
@@ -164,16 +137,6 @@ int main(int argc, char* argv[])
     std::string passphrase_file = command_line::get_arg(vm, arg_passphrase_file);
     if (!passphrase_file.empty())
     {
-      // The passphrase file is read below. Anything that is not a regular file
-      // must be refused here: opening a named pipe with no writer blocks this
-      // process indefinitely, with no message and nothing for a timeout to
-      // report, so an unusable argument becomes a hang instead of an error.
-      if (!tools::validate_path_argument(arg_passphrase_file.name, passphrase_file, tools::path_argument_kind::existing_file, path_error))
-      {
-        tools::fail_msg_writer() << path_error;
-        return 1;
-      }
-
       std::string passphrase;
       if (!epee::file_io_utils::load_file_to_string(passphrase_file, passphrase))
       { 
@@ -244,23 +207,17 @@ int main(int argc, char* argv[])
   BIO_free(bio_pkey);
 
   // write files
-  //
-  // Both files are created with an atomic O_CREAT | O_EXCL | O_NOFOLLOW open
-  // rather than with the truncating open of an ofstream: this tool writes a
-  // private key, and following a symbolic link or truncating an existing file
-  // means overwriting an arbitrary file chosen by whoever planted the link or
-  // mistyped the path. The umask set just below keeps the created files
-  // owner-only, exactly as before.
   tools::set_strict_default_file_permissions(true);
-  std::string save_error;
-  if (!tools::save_string_to_new_file(certificate_filename, certificate, save_error))
+  r = epee::file_io_utils::save_string_to_file(certificate_filename, certificate);
+  if (!r)
   {
-    tools::fail_msg_writer() << gencert::tr("Failed to save certificate file: ") << save_error;
+    tools::fail_msg_writer() << gencert::tr("Failed to save certificate file");
     return 1;
   }
-  if (!tools::save_string_to_new_file(private_key_filename, private_key, save_error))
+  r = epee::file_io_utils::save_string_to_file(private_key_filename, private_key);
+  if (!r)
   {
-    tools::fail_msg_writer() << gencert::tr("Failed to save private key file: ") << save_error;
+    tools::fail_msg_writer() << gencert::tr("Failed to save private key file");
     return 1;
   }
 

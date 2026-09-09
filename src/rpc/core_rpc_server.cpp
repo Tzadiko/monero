@@ -99,51 +99,6 @@ namespace
   {
     store_128(difficulty, sdiff, swdiff, stop64);
   }
-
-  /*!
-   * \brief Tells whether a command line value is a usable TCP listening port.
-   *
-   * The RPC bind ports reach the server as strings, because their defaults depend on the
-   * selected network (see core_rpc_server::arg_rpc_bind_port), and boost::program_options
-   * therefore performs no numeric range check on them. Further down the stack epee's
-   * boosted_tcp_server::init_server() parses the port into a uint32_t before handing it to
-   * Boost.Asio, which narrows it to the uint16_t an endpoint actually holds, so a value such
-   * as 99999 would be silently truncated (99999 % 65536 == 34463) and the daemon would end up
-   * listening on a port the operator never asked for. Validating here keeps that value from
-   * ever reaching the socket layer.
-   *
-   * \param port Raw command line value.
-   * \return True when \p port is a decimal number, zero padding allowed, in the inclusive
-   *         range [1, 65535].
-   */
-  bool is_valid_tcp_bind_port(const std::string &port)
-  {
-    // A leading run of zeros belongs to a valid decimal spelling: "028712" denotes 28712, and
-    // every layer below this one reads it that way, because epee's get_xtype_from_string()
-    // checks that the value is all digits and then hands it to boost::lexical_cast, which
-    // ignores the padding. The significant digits are therefore isolated before the length and
-    // range checks: this validation exists to stop an out of range value from reaching the
-    // socket layer, not to narrow the spellings an operator may already have in a config file.
-    const std::size_t first_significant_digit = port.find_first_not_of('0');
-    if (first_significant_digit == std::string::npos)
-      return false; // empty, or nothing but zeros: port 0 is never a usable listening port
-
-    // 65535 is the longest acceptable spelling once the padding is discounted; testing the
-    // length first also keeps the accumulation below from overflowing on a long value
-    if (port.size() - first_significant_digit > 5)
-      return false;
-
-    uint32_t value = 0;
-    for (std::size_t i = first_significant_digit; i < port.size(); ++i)
-    {
-      const char c = port[i];
-      if (c < '0' || c > '9')
-        return false;
-      value = value * 10 + static_cast<uint32_t>(c - '0');
-    }
-
-    return 0 < value && value <= 65535;
-  }
 }
 
 namespace cryptonote
@@ -182,27 +137,7 @@ namespace cryptonote
       , const std::string& proxy
     )
   {
-    // Apply the restricted flag first, before any path that can leave init() early. It decides
-    // which methods this server answers, so it must never be left holding a value that does not
-    // belong to this initialisation - not even on a path where the caller aborts startup. This
-    // is also the order every release before the bind port guard below used.
     m_restricted = restricted;
-
-    // Reject an unusable bind port before anything is created: no socket, and in particular no
-    // RPC TLS key pair, is worth generating for a server that cannot legally listen. Naming the
-    // option the value came from keeps the diagnostic actionable for both the core and the
-    // restricted server, which share this entry point.
-    if (!is_valid_tcp_bind_port(port))
-    {
-      const char *port_option = arg_rpc_bind_port.name;
-      if (!command_line::is_arg_defaulted(vm, arg_rpc_restricted_bind_port) &&
-          port == command_line::get_arg(vm, arg_rpc_restricted_bind_port))
-        port_option = arg_rpc_restricted_bind_port.name;
-      MFATAL("Invalid --" << port_option << " value '" << port
-        << "': an RPC bind port must be a decimal number in the range 1-65535");
-      return false;
-    }
-
     m_net_server.set_threads_prefix("RPC");
     m_net_server.set_connection_filter(&m_p2p);
 
@@ -1974,14 +1909,7 @@ namespace cryptonote
     }
 
     block_verification_context bvc;
-    // handle_block_found() reports failure only when verification failed: Blockchain::add_new_block()
-    // signals a block the node already knows by setting bvc.m_already_exists and returning false, and
-    // that return value is not propagated. Without the m_already_exists check a resubmission of a block
-    // that is already in the chain (or already a known alternative block) would be answered with
-    // status OK even though nothing was added, so a caller could not tell how many of the blocks it
-    // submitted were actually accepted. Blocks that legitimately land on an alternative chain are still
-    // accepted: they set m_added_to_main_chain to false, which is not an error.
-    if(!m_core.handle_block_found(b, bvc) || bvc.m_already_exists)
+    if(!m_core.handle_block_found(b, bvc))
     {
       error_resp.code = CORE_RPC_ERROR_CODE_BLOCK_NOT_ACCEPTED;
       error_resp.message = "Block not accepted";

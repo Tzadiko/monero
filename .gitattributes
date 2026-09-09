@@ -1,17 +1,3 @@
-# `git archive`, and the archivers built on top of it, drop every path that
-# carries the export-ignore attribute, which keeps Git's own plumbing out of a
-# released source archive. Mind the consequence: Git stores no empty
-# directories, so a directory whose only tracked file is a dot-git one vanishes
-# from the archive altogether. src/device_trezor/trezor/messages/, the directory
-# the Trezor protobuf sources are generated into, therefore keeps a placeholder
-# whose name matches no pattern below.
 .git* export-ignore
-
-# Stamp the archived commit's hash and ref names into the top-level
-# version.cmake. cmake/GitVersion.cmake reads them when no Git working tree is
-# available, so that binaries built from a source archive report the commit they
-# came from. Only an archiver that asks Git for file content substitutes them; one
-# that copies the working tree instead (git-archive-all) leaves them verbatim.
-/version.cmake export-subst
-
+version.cmake export-subst
 tests/data/** -text

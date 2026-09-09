@@ -31,7 +31,6 @@
 #include "common/command_line.h"
 #include "cryptonote_core/cryptonote_core.h"
 #include "blockchain_db/blockchain_db.h"
-#include "hardforks/hardforks.h"
 #include "version.h"
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
@@ -76,7 +75,6 @@ int main(int argc, char* argv[])
   command_line::add_arg(desc_cmd_sett, arg_blocks_dat);
 
   command_line::add_arg(desc_cmd_only, command_line::arg_help);
-  command_line::add_arg(desc_cmd_only, command_line::arg_version);
 
   po::options_description desc_options("Allowed options");
   desc_options.add(desc_cmd_only).add(desc_cmd_sett);
@@ -95,13 +93,7 @@ int main(int argc, char* argv[])
   {
     std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL << ENDL;
     std::cout << desc_options << std::endl;
-    return 0;
-  }
-
-  if (command_line::get_arg(vm, command_line::arg_version))
-  {
-    std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL;
-    return 0;
+    return 1;
   }
 
   mlog_configure(mlog_get_default_log_path("monero-blockchain-export.log"), true);
@@ -157,23 +149,7 @@ int main(int argc, char* argv[])
     return 1;
   }
   const network_type net_type = core::get_network_type_from_args(vm);
-
-  // Blockchain::init() refuses FAKECHAIN (--regtest) unless it is given the
-  // hard fork table to use, so supply the very table monerod builds for
-  // --regtest in core::init() (src/cryptonote_core/cryptonote_core.cpp): a
-  // regtest database is written with those forks, and initialising it here with
-  // any other set would not describe the database on disk. Every other network
-  // takes its forks from the hardcoded tables and needs no options.
-  const std::pair<uint8_t, uint64_t> regtest_hard_forks[3] = {std::make_pair(1, 0), std::make_pair(mainnet_hard_forks[num_mainnet_hard_forks-1].version, 1), std::make_pair(0, 0)};
-  const cryptonote::test_options regtest_test_options = {
-    regtest_hard_forks,
-    0
-  };
-  r = core_storage->blockchain.init(db, net_type, false /*offline*/, net_type == FAKECHAIN ? &regtest_test_options : NULL);
-
-  // Check the result before touching core_storage: a failed init() leaves the
-  // Blockchain without a database, and every accessor below dereferences it.
-  CHECK_AND_ASSERT_MES(r, 1, "Failed to initialize source blockchain storage");
+  r = core_storage->blockchain.init(db, net_type);
 
   if (core_storage->blockchain.get_blockchain_pruning_seed() && !opt_blocks_dat)
   {
@@ -181,6 +157,7 @@ int main(int argc, char* argv[])
     return 1;
   }
 
+  CHECK_AND_ASSERT_MES(r, 1, "Failed to initialize source blockchain storage");
   LOG_PRINT_L0("Source blockchain storage initialized OK");
   LOG_PRINT_L0("Exporting blockchain raw data...");
 

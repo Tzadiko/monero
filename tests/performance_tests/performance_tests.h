@@ -42,17 +42,6 @@
 #include "common/perf_timer.h"
 #include "common/timings.h"
 
-/**
- * Keep a function out of line. Every compiler family this project builds with (GCC, Clang, Apple
- * Clang, MinGW-w64 GCC) defines __GNUC__ and understands the attribute; anything else gets an empty
- * expansion, which costs only the inlining guarantee and never a diagnostic.
- */
-#if defined(__GNUC__)
-  #define PERFORMANCE_TESTS_NOINLINE __attribute__((noinline))
-#else
-  #define PERFORMANCE_TESTS_NOINLINE
-#endif
-
 class performance_timer final
 {
 public:
@@ -168,12 +157,7 @@ public:
   int time_per_call(int scale = 1) const
   {
     static_assert(0 < T::loop_count, "T::loop_count must be greater than 0");
-    const size_t calls = T::loop_count * m_core_params.loop_multiplier;
-    // loop_multiplier is rejected when it is zero while the command line is parsed, so no run of the
-    // harness reaches this with an empty call count; the guard keeps that from being a SIGFPE if it ever does.
-    if (0 == calls)
-      return 0;
-    return m_elapsed * scale / calls;
+    return m_elapsed * scale / (T::loop_count * m_core_params.loop_multiplier);
   }
 
   uint64_t get_min() const { return m_stats->get_min(); }
@@ -192,14 +176,8 @@ public:
 private:
   /**
    * Warm up processor core, enabling turbo boost, etc.
-   *
-   * This must stay out of line: inlined into run(), the counter loop below is register-allocated
-   * under the whole enclosing instantiation's pressure, and the heaviest tests then spill the loop
-   * counter through the value register, adding two moves per iteration and making the warm-up
-   * several times more expensive than it is elsewhere. Compiled on its own it is the same loop for
-   * every instantiation, so warm-up cost stays uniform and comparable across tests.
    */
-  PERFORMANCE_TESTS_NOINLINE uint64_t warm_up()
+  uint64_t warm_up()
   {
     const size_t warm_up_rounds = 1000 * 1000 * 1000;
     m_warm_up = 0;

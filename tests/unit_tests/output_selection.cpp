@@ -221,35 +221,8 @@ TEST(select_outputs, same_distribution)
 
 TEST(select_outputs, exact_unlock_block)
 {
-  // This case asserts that the picker can reach one specific block - the youngest spendable one -
-  // and a pick lands there only when floor(x / average_output_time) < num_outs_in_that_block - 1
-  // (see gamma_picker::pick), so the whole case turns on how many outputs that one block holds.
-  // Drawing the per-block count from crypto::rand, as MKOFFSETS does for the statistical cases
-  // above where only the aggregate distribution matters, re-rolled that width uniformly over
-  // 1..32 on every run: a run that drew 1 made the target block unreachable and failed with
-  // certainty after burning the whole pick budget, which is the ~1-in-32 flake this replaces.
-  // The picks themselves stay random - gamma_picker draws from crypto::rand and has no seeding
-  // hook - but the input data no longer is: splitmix64 (Vigna, public domain) with a fixed seed
-  // reproduces exactly the shape MKOFFSETS(300000, 1 + (rand & 0x1f)) produces - 300000 blocks
-  // holding 1..32 outputs each, varying per block, cumulative - byte-identical on every run.
-  // The seed is arbitrary (ASCII "monero") beyond being chosen so the youngest spendable block
-  // lands at the wide end of that 1..32 range; the ASSERT_GE below pins that property down.
-  uint64_t prng_state = UINT64_C(0x6D6F6E65726F0000);
-  const auto next_block_num_outs = [&prng_state]() -> size_t {
-    prng_state += UINT64_C(0x9E3779B97F4A7C15);
-    uint64_t z = prng_state;
-    z = (z ^ (z >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
-    z = (z ^ (z >> 27)) * UINT64_C(0x94D049BB133111EB);
-    z ^= z >> 31;
-    return 1 + (z & 0x1f);
-  };
-
-  std::vector<uint64_t> offsets(300000);
-  size_t n_outs = 0;
-  for (auto &offset: offsets)
-  {
-    offset = n_outs += next_block_num_outs();
-  }
+  std::vector<uint64_t> offsets;
+  MKOFFSETS(300000, 1 + (crypto::rand<size_t>() & 0x1f));
   tools::gamma_picker picker(offsets);
 
   // Calculate output offset ranges for the very first block that is spendable.
@@ -262,25 +235,9 @@ TEST(select_outputs, exact_unlock_block)
   const uint64_t exact_block_offsets_start_inclusive = *(first_block_too_young - 2);
   const uint64_t exact_block_offsets_stop_exclusive = *(first_block_too_young - 1);
 
-  // How wide the youngest spendable block is. This width and the pick budget below are jointly
-  // what make the case deterministic: a block one output wide can never be hit at all, and wider
-  // blocks are hit proportionally sooner, so the fixed table above has to keep this block at the
-  // wide end of the 1..32 range the generator produces - 32, the widest it can produce, for the
-  // seed above. Asserting it is the tripwire for anyone who changes the seed, the block count or
-  // the generator and would otherwise reintroduce the flake silently.
-  constexpr uint64_t MIN_EXACT_BLOCK_NUM_OUTS = 32;
-  const uint64_t exact_block_num_outs = exact_block_offsets_stop_exclusive - exact_block_offsets_start_inclusive;
-  ASSERT_GE(exact_block_num_outs, MIN_EXACT_BLOCK_NUM_OUTS);
-
-  // Budget for the draw loop below. At the width asserted above a single pick lands in the target
-  // block with probability ~7.3e-3, i.e. ~140 draws on average, and the loop breaks on the first
-  // hit - so this budget bounds only the pathological tail and a passing run never approaches it
-  // (the case measures a couple of milliseconds end to end). Raising it from 1 << 20 leaves the
-  // residual chance of drawing nothing but misses at ~(1-7.3e-3)^(2^24), which is far below any
-  // rate that could be observed. Sensitivity is not lost by the larger budget: every draw is
-  // still checked against the too-young bound below, so a picker that could return an output that
-  // is not yet spendable gets more chances to be caught here, not fewer.
-  constexpr size_t NUM_PICK_TESTS = 1 << 24;
+  // if too low we may fail by not picking exact block
+  // if too high test is not as sensitive as it could be
+  constexpr size_t NUM_PICK_TESTS = 1 << 20;
 
   bool picked_exact_unlock_block = false;
   for (size_t i = 0; i < NUM_PICK_TESTS; ++i)

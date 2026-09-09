@@ -121,64 +121,24 @@ def kill():
     except: pass
 
 # wait for error/startup
-#
-# Every server gets its OWN startup budget. A single deadline shared by the
-# sequential probes of all the servers made each one inherit whatever the
-# previous ones had consumed, so one slow starter (a wallet generating its
-# self-signed certificate, or any process descheduled on a loaded host) aborted
-# the whole run before a single scenario had been given a chance to execute.
-# The budget is deliberately generous and can be overridden for testing.
-DEFAULT_STARTUP_TIMEOUT = 60
-STARTUP_TIMEOUT_VAR = 'MONERO_FUNCTIONAL_TESTS_STARTUP_TIMEOUT'
-# cap for a single connect_ex, so the loop keeps polling the process state
-# instead of blocking for the whole remaining budget in one syscall
-PROBE_TIMEOUT = 1
-
-startup_timeout = DEFAULT_STARTUP_TIMEOUT
-if STARTUP_TIMEOUT_VAR in os.environ:
-  try:
-    startup_timeout = float(os.environ[STARTUP_TIMEOUT_VAR])
-  except ValueError:
-    print('Ignoring invalid ' + STARTUP_TIMEOUT_VAR + ': ' + os.environ[STARTUP_TIMEOUT_VAR] + ', using ' + str(DEFAULT_STARTUP_TIMEOUT) + ' s')
-    startup_timeout = DEFAULT_STARTUP_TIMEOUT
-
-startup_start = time.monotonic()
-slowest_port = ports[0]
-slowest_wait = 0
-for i in range(len(ports)):
-  port = ports[i]
+startup_timeout = 10
+deadline = time.monotonic() + startup_timeout
+for port in ports:
   addr = ('127.0.0.1', port)
-  port_start = time.monotonic()
-  deadline = port_start + startup_timeout
   delay = 0
   while True:
     time.sleep(delay)
-    # a process which exited will never open its port: report it now with its
-    # exit status instead of waiting out the budget and blaming the port
-    status = processes[i].poll()
-    if status is not None:
-      print('Process for port ' + str(port) + ' (' + os.path.basename(command_lines[i][0]) + ') exited before opening its port, exit status: ' + str(status) + ', see ' + outputs[i].name)
-      kill()
-      sys.exit(1)
     timeout = deadline - time.monotonic()
     if timeout <= 0:
       print('Failed to start wallet or daemon, last port checked: ' + str(port))
-      print('Waited ' + '%.2f' % (time.monotonic() - port_start) + ' s for port ' + str(port) + ' (per server startup timeout: ' + '%g' % startup_timeout + ' s, override with ' + STARTUP_TIMEOUT_VAR + ')')
       kill()
       sys.exit(1)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-      s.settimeout(min(timeout, PROBE_TIMEOUT))
+      s.settimeout(timeout)
       err = s.connect_ex(addr)
     if err == 0:
       break
     delay = .1
-  wait = time.monotonic() - port_start
-  if wait > slowest_wait:
-    slowest_wait = wait
-    slowest_port = port
-
-print('Started ' + str(len(ports)) + ' servers in ' + '%.2f' % (time.monotonic() - startup_start) + ' s (slowest: port ' + str(slowest_port) + ' at ' + '%.2f' % slowest_wait + ' s, per server startup timeout: ' + '%g' % startup_timeout + ' s)')
-sys.stdout.flush()
 
 # online daemons need some time to connect to peers to be ready
 time.sleep(2)

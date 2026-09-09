@@ -33,7 +33,6 @@
 #include <chrono>
 #include <cstring>
 #include <stdexcept>
-#include <string_view>
 #include <unordered_set>
 
 #include <boost/uuid/nil_generator.hpp>
@@ -74,17 +73,9 @@ namespace rpc
       return std::strcmp(lhs.method_name, rhs.method_name) < 0;
     }
 
-    /* A requested method name is arbitrary JSON string content, not a C string:
-       it can contain embedded NUL bytes. Compare over the full byte length so a
-       NUL-bearing name cannot be truncated into a table entry by the lookup.
-       `std::string_view` ordering is lexicographic over the same bytes that
-       `std::strcmp` walks, so for the NUL-free ASCII literals of the `handlers`
-       table this orders identically to the `handler_map`/`handler_map` overload
-       above - the sortedness invariant `std::lower_bound` relies on, and which
-       `std::is_sorted_until` checks in the DaemonHandler constructor, holds. */
     bool operator<(const handler_map& lhs, const std::string& rhs) noexcept
     {
-      return std::string_view{lhs.method_name} < std::string_view{rhs};
+      return std::strcmp(lhs.method_name, rhs.c_str()) < 0;
     }
 
     template<typename Message>
@@ -387,9 +378,7 @@ namespace rpc
     std::string tx_blob;
     if(!epee::string_tools::parse_hexstr_to_binbuff(req.tx_as_hex, tx_blob))
     {
-      // tx_as_hex is caller-supplied and reaches the log verbatim otherwise, so a newline,
-      // carriage return or tab in it would split or forge log entries (CWE-117).
-      MERROR("[SendRawTxHex]: Failed to parse tx from hexbuff: " << epee::sanitize_for_log(req.tx_as_hex));
+      MERROR("[SendRawTxHex]: Failed to parse tx from hexbuff: " << req.tx_as_hex);
       res.status = Message::STATUS_FAILED;
       res.error_details = "Invalid hex";
       return;
@@ -1016,12 +1005,7 @@ namespace rpc
       }
 
       const auto matched_handler = std::lower_bound(std::begin(handlers), std::end(handlers), request_type);
-      /* The requested name is arbitrary JSON string content, not a C string, so
-         require byte-for-byte equality over its full length: comparing as
-         `std::string_view`s means a name that only shares a prefix with the
-         matched table entry - including one cut short by an embedded NUL - is
-         refused instead of dispatched. */
-      if (matched_handler == std::end(handlers) || std::string_view{matched_handler->method_name} != std::string_view{request_type})
+      if (matched_handler == std::end(handlers) || matched_handler->method_name != request_type)
         return BAD_REQUEST(request_type, req_full.getID());
 
       epee::byte_slice response = matched_handler->call(*this, req_full.getID(), req_full.getMessage());

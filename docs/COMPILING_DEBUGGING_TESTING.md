@@ -73,30 +73,19 @@ Status column names the evidence for each row, so that a verified pairing is
 never read as one that is only declared, only enforced by CI, or still awaiting
 its gate.
 
-Two things about how to read the table. First, a version in the Compiler
-column after a floor, and a version in the Standard library / Boost column, are
-the versions the acceptance build actually used — they record what was
-exercised, not a patch-level requirement, and a later patch release of the same
-family is covered by the row. Second, "Verified" is reserved for a pairing that
-was configured, built in full and tested in an environment we can point at;
-where the pairing is exercised only by a CI image, the row says **CI-enforced**
-and names the job, because a version that no acceptance build compiled must not
-be read as one that was.
-
 | Compiler | Standard library / Boost | Status |
 | --- | --- | --- |
-| GCC ≥ 13 (floor) — 13.4.0 | libstdc++ 13 / Boost 1.88.0 | **Verified**: configured, built in full and tested, against the Boost the build host provided |
-| GCC 14 — 14.3.0 | libstdc++ 14 / Boost 1.88.0 | **Verified**: configured, built in full and tested |
-| GCC 13 and GCC 14 | libstdc++ 13 or 14 / Boost 1.83 | **CI-enforced, not built here**: Boost 1.83 is what the Ubuntu 24.04 and Debian 13 images ship, so the `build-linux` jobs exercise that pairing on every push. No acceptance build compiled 1.83 locally, so this row claims CI coverage and nothing more |
-| Clang ≥ 16 (floor) — 16.0.4 | libstdc++ 13 / Boost 1.88.0 | **Verified** (`-std=c++2b`): the only verified Clang 16 pairing, and Clang must be pointed at the libstdc++ 13 headers on a host that also carries 14 (`--gcc-install-dir=/usr/lib/gcc/<triple>/13`) |
-| Clang 16 | libstdc++ 14 | **Fails** at C++23: `std::pair`'s C++23 pair-like converting constructor (P2165R4) cannot be resolved inside Boost.Variant/Boost.Spirit, so translation units reaching that instantiation stop with errors in `bits/stl_pair.h`. A compiler/standard-library pairing defect, not first-party code; documented as unsupported |
-| Clang 18 — 18.1.8 | libstdc++ 14 / Boost 1.88.0 | **Verified** and warning-clean; Boost 1.88 sits on the Boost ≥ 1.84 side of the condition in the next row |
-| Clang ≥ 18 | libstdc++ ≥ 14 / Boost ≤ 1.83 | **Conditional support requirement**: the tree builds and passes its tests, but Beast's use of the deprecated `std::aligned_storage` yields one Boost-internal warning origin, so Boost ≥ 1.84 is required for a warning-clean build. Measured in the reference environment, which carried Boost 1.83; it cannot be reproduced on a host whose only Boost is ≥ 1.84 |
-| Clang 18, Debug, `STACK_TRACE` via libunwind | libstdc++ 14 | **Verified** for `obj_common` only: 17 objects, including `src/common/stack_trace.cpp`, at C++23 with zero warnings; the only exercise of the libunwind path, which no CI job builds |
+| GCC ≥ 13 (floor) — 13.3.0 | libstdc++ 13 / Boost 1.83 | **Verified**; the Ubuntu 24.04 CI image and the reference Debian-13-class configuration |
+| GCC 14.2.0 | libstdc++ 14 / Boost 1.83 | **Verified**; the Debian 13 CI image |
+| Clang ≥ 16 (floor) — 16.0.6 | libstdc++ 13 / Boost 1.83 | **Verified** (`-std=c++2b`); the only verified Clang 16 pairing |
+| Clang 16.0.6 | libstdc++ 14 | **Fails** at C++23 in five objects — a compiler/standard-library pairing defect, not first-party code; documented as unsupported |
+| Clang 18.1.3 | libstdc++ 14 / Boost 1.91.0 | **Verified** and warning-clean |
+| Clang 18.1.3 | libstdc++ 14 / Boost 1.83 | Builds and passes tests; emits one Boost-internal Beast deprecation — **conditional support requirement**: Clang ≥ 18 with libstdc++ ≥ 14 needs Boost ≥ 1.84 to be warning-clean |
+| Clang 18.1.3, Debug, `STACK_TRACE` via libunwind 1.6.2 | libstdc++ 14 | **Verified** for `obj_common` only: 17 objects, including `src/common/stack_trace.cpp`, at C++23 with zero warnings; the only exercise of the libunwind path, which no CI job builds |
 | Clang (any) | libc++ | **Not verified**; no CI or release path on Linux uses it |
 | Apple Clang ≥ 15 (floor, Xcode 15 = LLVM 16 base) | Xcode libc++ / Homebrew Boost | **Declared, guard-enforced, not demonstrated**; the only continuous evidence is **CI-enforced**, on a newer Xcode (see below) |
 | MinGW-w64 GCC ≥ 13 (floor) | libstdc++ 13 / MSYS2 or depends Boost | **CI-enforced only**: the Windows `ucrt64` job and the `x86_64-w64-mingw32` depends job |
-| depends cross hosts and Guix (`gcc-15` Linux, `clang-toolchain-22` Darwin) | Boost 1.91.0, OpenSSL 3.5.7, ZeroMQ 4.3.5, protobuf 3.21.12 (all pinned) | **Not built here; pre-acceptance gate**: pinned, not verified (see below). At this dialect the pinned protobuf recipe emits a diagnostic of its own on every host, recorded under "Documented third-party diagnostics" |
+| depends cross hosts and Guix (`gcc-15` Linux, `clang-toolchain-22` Darwin) | Boost 1.91.0, OpenSSL 3.5.7, ZeroMQ 4.3.5, protobuf 3.21.12 (all pinned) | **Not built here; pre-acceptance gate**: pinned, not verified (see below) |
 
 The Apple Clang row is the one floor in this matrix that has not been
 demonstrated, and it is published as exactly that: declared, and enforced by
@@ -138,113 +127,26 @@ so this table is the only place it is documented.
 
 ### Libraries
 
-Boost 1.69 is the declared floor, unchanged by the move to C++23. Which Boost
-versions have actually been through a C++23 build, and on what evidence, is
-worth stating precisely, because the floor and the exercised versions are
-different things:
-
-- **1.88.0 — verified.** Every acceptance build of this tree was configured and
-  linked against 1.88.0, the version its build host provided, on all four
-  compiler rows of the matrix above.
-- **1.83 — CI-enforced, not built locally.** 1.83 is the version the Ubuntu
-  24.04 and Debian 13 images ship, so the `build-linux` jobs compile the tree
-  against it on every push. No local acceptance build compiled 1.83, so it is
-  claimed here as CI coverage rather than as a locally verified pairing.
-- **1.91.0 — pinned in `contrib/depends`, covered by the depends gate.** The
-  cross-build recipe pins it and rebuilds it at this dialect; that is the
-  `depends.yml`/`guix.yml` gate described with the last row of the matrix, not
-  a native build.
-- **1.69 through 1.82 — nothing claimed.** They were not built or tested at
-  this dialect in any pairing; the declared floor is all that stands behind
-  them.
-
-Clang 18 or newer with libstdc++ 14 or newer must use Boost 1.84 or newer for a
-warning-clean build. With Boost 1.83 that combination builds and passes its
-tests, but Beast's use of the deprecated `std::aligned_storage` produces one
-Boost-internal warning origin (eight diagnostics in the full build that
-measured it), reached through the tree's single Beast consumer,
+Boost 1.69 is the declared floor, unchanged by the move to C++23; 1.83 and
+1.91.0 are the versions verified under C++23. Clang 18 or newer with libstdc++
+14 or newer must use Boost 1.84 or newer for a warning-clean build. With Boost
+1.83 that combination builds and passes its tests, but Beast's use of the
+deprecated `std::aligned_storage` produces one Boost-internal warning origin
+(eight diagnostics in the measured full build), reached
+through the tree's single Beast consumer,
 `tests/unit_tests/epee_http_server.cpp`; Boost 1.84.0 replaced that use
-upstream, so releases from 1.84 onwards do not carry it, and a host whose only
-Boost is 1.84 or newer — 1.88.0 in the verified rows above — cannot reproduce
-it. Nothing is suppressed for any of this — no `-Wno-*` flag and no diagnostic
-pragma is added anywhere — the resolution is the newer Boost.
+upstream, so releases from 1.84 onwards do not carry it. Boost 1.69 through
+1.82 were not built or tested at this dialect in any pairing, so nothing is
+claimed for them here beyond the declared floor. Nothing is suppressed for any
+of this — no `-Wno-*` flag and no diagnostic pragma is added anywhere — the
+resolution is the newer Boost.
 
 OpenSSL 1.1.1 is the declared floor and is likewise unchanged: it is a C API
-consumed through `extern "C"`, so the C++ dialect cannot move it. 3.0.13 was
-verified in the reference environment and 3.5.3 in the environment that built
-the delivered tree; 3.5.7 is the version pinned in `contrib/depends` and, like
-every other pin, is covered by the depends gate rather than by a native build.
+consumed through `extern "C"`, so the C++ dialect cannot move it. 3.0.13 is the
+version verified against, and 3.5.7 is the version pinned in `contrib/depends`.
 
 Raising either declared floor is a separate maintainers' decision, not a
 consequence of the move to C++23.
-
-The remaining libraries in the `README.md` dependency table deserve the same
-distinction, and for most of them the honest answer is that the build declares
-no version at all — which is what `any` in that column means. What is worth
-recording is therefore the version the code itself requires, where it requires
-one, and the versions that have actually been through a build:
-
-- **libsodium — no declared floor.** `find_package(Sodium REQUIRED)` in the
-  top-level `CMakeLists.txt` passes no version, so nothing is enforced at
-  configure time, and the surface the tree uses is narrow and long-standing:
-  `crypto_verify_32`, the `crypto_shorthash_siphash24` key and output size
-  constants in `src/crypto/generic-ops.h`, and
-  `crypto_aead_chacha20poly1305_ietf_decrypt` in the Trezor protocol code.
-  1.0.18 is the version verified here and the version `contrib/depends` pins.
-  One property of that pin is worth knowing rather than acting on: the advisory
-  raised against 1.0.18 concerns `crypto_core_ed25519_is_valid_point`, and this
-  tree calls no `crypto_core_ed25519` or `crypto_scalarmult_ed25519` entry point
-  at all, so it is not reachable from here. Whether to move the pin is a
-  maintainers' decision about `contrib/depends`.
-- **libhidapi — no declared floor.** The API this tree calls — `hid_init`,
-  `hid_exit`, `hid_enumerate`, `hid_free_enumeration`, `hid_open_path`,
-  `hid_close`, `hid_read`, `hid_read_timeout`, `hid_write`, `hid_error` —
-  predates every release in packaged use, and no version is checked at configure
-  time. 0.14.0 is verified here; `contrib/depends` pins 0.15.0.
-- **libusb — 1.0.16, derived from the code rather than declared by the build.**
-  `src/device_trezor/trezor/transport.cpp:847` calls
-  `libusb_get_port_numbers`, which libusb added in 1.0.16, so that is a real
-  minimum even though nothing enforces it. The `libusb_set_option` call beside
-  it does not raise the floor: it is compiled only behind
-  `#if defined(LIBUSB_API_VERSION) && (LIBUSB_API_VERSION >= 0x01000106)`, with
-  a `libusb_set_debug` fallback for anything older. 1.0.29 is verified here;
-  `contrib/depends` pins 1.0.30.
-- **libprotobuf and protoc — a matched pair rather than a floor.** The Trezor
-  protobuf sources are not committed: `cmake/CheckTrezor.cmake` regenerates them
-  into `src/device_trezor/trezor/messages` on every configure, so the generated
-  code always carries the version guard of the local `protoc` and has to be
-  compiled against the matching runtime. What the build needs is therefore that
-  the two agree, not that either reaches some absolute version — which is why
-  `find_package(Protobuf)` is asked for no version and the table says "matching"
-  instead. 3.21.12, with `protoc` reporting `libprotoc 3.21.12`, is the pair
-  verified here and the release `contrib/depends` pins. Two conditions bound the
-  usable range at the other end, both visible in the tree: from protobuf 22 the
-  library requires Abseil, which `CheckTrezor.cmake` accommodates by defining
-  `PROTOBUF_HAS_ABSEIL` when it detects that version or newer; and
-  `src/device_trezor/trezor/protocol.cpp` still uses the legacy
-  `google::protobuf::uint32` and `google::protobuf::uint64` aliases, so a
-  protobuf that no longer provides them would need those casts changed first. No
-  release beyond 3.21.12 has been exercised.
-- **libudev — no declared floor, and needed by one configuration only.** It is
-  not a dependency of an ordinary build; which build needs it, and why the
-  configure step now fails rather than warns when it is missing, is described
-  under "Build-system changes beyond the dialect switch" below.
-- **libunwind — no declared floor, and narrower in scope than the table
-  suggests.** It backs the exception stack-trace hook, and the root build
-  reaches for it only in the one case none of its earlier branches claim: a
-  non-Release build, on neither Apple nor NetBSD, not a non-Linux
-  `contrib/depends` build, not ARM, and compiled by something other than
-  non-MinGW GCC — in practice a Clang debug build on Linux. A GCC build gets
-  the same hook from easylogging++ instead and links no libunwind at all, and
-  every Linux CI job builds `Release`, where the hook is off, so no CI job
-  exercises this path; the configure line to look for is either "Stack trace on
-  exception enabled (using libunwind)" or "disabled". On macOS the build
-  disables it outright, which is why `contrib/brew/Brewfile` installs no
-  libunwind package: `libunwind-headers` would be dead weight there, and
-  Homebrew has deprecated that formula as unmaintained. The `Brewfile` records
-  the same reasoning where the package would otherwise sit, so that the
-  README's "install all dependencies at once" claim for macOS stays true
-  without it.
 
 ### Rust
 
@@ -253,163 +155,6 @@ built unconditionally — so both must be on `PATH` before CMake is configured.
 `src/fcmp_pp/fcmp_pp_rust/Cargo.toml` declares no `rust-version`, so the
 repository states no minimum supported Rust version; 1.93, installed through
 rustup, is the toolchain CI tests with.
-
-### Documented third-party diagnostics
-
-The move to C++23 is held to adding no new warning origin, and the first-party
-tree meets that: no `-Wno-*` flag, no diagnostic pragma and no
-`[[maybe_unused]]` is added anywhere, and every diagnostic the dialect
-surfaced in this repository's own code was removed by rewriting the code. Two
-dependencies do emit a dialect-induced diagnostic from inside their own
-headers, where the fix belongs upstream rather than here. Both are recorded
-below rather than silenced, and they are the only third-party origins observed
-at this dialect: when a build's warning census is compared against a C++17
-baseline, these are the allowed difference and any other new origin is a
-regression to be fixed at source.
-
-The first is Boost.Beast's deprecated `std::aligned_storage` with Clang ≥ 18
-and libstdc++ ≥ 14, described under "Libraries" above and resolved by using
-Boost ≥ 1.84.
-
-The second appears only in the `contrib/depends` cross-builds, in the pinned
-protobuf recipe:
-
-| Property | Value |
-| --- | --- |
-| Flag | `-Wdeprecated-enum-enum-conversion` |
-| Emitted by | protobuf 21.12 (protobuf-cpp 3.21.12), the version `contrib/depends/packages/protobuf.mk` pins, from its own header `google/protobuf/generated_message_tctable_impl.h` |
-| Extent | 35 distinct origins — lines 186, 188–196, 198–203, 205, 207–215, 217–222, 225–227 — reached while compiling three of protobuf's own translation units (`generated_message_tctable_full.cc`, `generated_message_tctable_lite.cc`, `unknown_field_set.cc`), so 105 diagnostics per depends host |
-| Cause | P1120R0 deprecated arithmetic between two different enumeration types in C++20. The header composes its field-layout constants that way, e.g. `kBool = kFkVarint \| kRep8Bits`, mixing `field_layout::FieldKind` with `field_layout::FieldRep`. C++23 is the first dialect this repository compiles the recipe under |
-| Scope | Every depends host, and independent of the host compiler and standard library: it reproduces identically with Clang and with GCC, and on the two Apple Darwin hosts and the FreeBSD host whose sysroots carry an older libc++ |
-| Effect on the build | None. No `-Werror` reaches the recipe — `contrib/depends` adds none — so the diagnostics cannot become errors, and no first-party warning origin is added on any host |
-| Why a native build never shows it | Natively, protobuf is found in a system include directory and diagnostics from system headers are suppressed. In depends the recipe compiles its own headers through `-I.`/`-I..`, where that suppression does not apply |
-
-To see it without a cross-build, compile the header as a non-system include —
-`printf '#include "google/protobuf/generated_message_tctable_impl.h"\nint main(){return 0;}\n' > tu.cpp` then
-`c++ -std=c++23 -I<dir containing google/> -c tu.cpp` — which yields the 35
-diagnostics; the same command at `-std=c++17`, or with `-isystem` in place of
-`-I`, yields none.
-
-The disposition is the same as for the Beast condition: it is documented, and
-it is not suppressed. Removing it would mean either adding
-`-Wno-deprecated-enum-enum-conversion` to that one recipe through the
-`$(package)_cxxflags_$(host_os)` hook that `contrib/depends/packages/zeromq.mk`
-already uses for its own flags — a flag on third-party code rather than a
-first-party suppression — or moving the recipe to a protobuf release that fixed
-the enum arithmetic upstream. Both change the inputs of a reproducible build,
-which makes them maintainers' decisions rather than part of a language-standard
-migration, so neither is done here.
-
-## Build-system changes beyond the dialect switch
-
-The dialect is spelled out in three places — `CMAKE_CXX_STANDARD` in the
-top-level `CMakeLists.txt`, `CXX_STANDARD` in `contrib/depends/Makefile`, and the
-Darwin branch of `contrib/depends/toolchain.cmake.in` — and every other build
-file in the tree inherits it from one of those. Raising the CMake floor to 3.25
-and enforcing the compiler floors above nevertheless reached a few build files
-that carry no dialect setting at all, because a prerequisite that used to be
-diagnosed late, or not at all, now has to be diagnosed by name at configure
-time. Those changes are recorded here, with the reason for each, so that the
-build system can be reviewed without having to infer why a find module or a
-version stamp moved in a language-standard migration. None of them changes what
-is built or how it behaves; each changes when and how a missing prerequisite is
-reported, or what a binary reports about its own provenance.
-
-### Commit identity in builds made from a source archive
-
-`cmake/GitVersion.cmake` derives what a binary reports as its version from Git:
-`git rev-parse --short=9 HEAD` for the commit, and `git tag -l --points-at HEAD`
-for whether that commit is a tagged release. Neither answers in a source
-archive, which carries no Git working tree, and yet the module's own diagnostic
-already told the reader to build "either from a Git working tree or from a
-source archive" — advice it could not honour, because the archive case fell
-through to `VERSIONTAG` becoming `unknown`.
-
-The top-level `version.cmake` closes that gap. `.gitattributes` already declared
-`version.cmake export-subst` before this change, for a file the tree did not
-contain, so nothing was ever stamped; the file now exists, and the pattern is
-anchored as `/version.cmake` so that it cannot also match a file of that name
-further down the tree. That attribute is what makes the mechanism work:
-`git archive` — and every archiver that asks Git for file content, including the
-"Source code" tarballs GitHub generates for a tag — substitutes the archived
-commit's hash and its ref names into the two placeholders the file holds.
-`GitVersion.cmake` consults the stamp only after Git has failed, reports `You
-are building from a source archive of commit <hash>`, and treats a stamp whose
-ref names carry `tag: ` as the tagged release that the Git path would have
-reported.
-
-The stamp is parsed as untrusted input, because that is what an archive is.
-`version.cmake` is valid CMake, but `GitVersion.cmake` never includes it: it
-reads the file as text, accepts the hash only as a complete 40-character
-hexadecimal string — which an unsubstituted `$Format:` placeholder cannot be —
-and uses the ref names for nothing but a test for the substring `tag: `. Nothing
-read out of an archive reaches a command line, a filesystem path, or a CMake
-`include()`.
-
-The older tarball test in `cmake/Version.cmake` — `if ("$Format:$" STREQUAL "")`
-— is a different mechanism and cannot fire: that file is not marked
-`export-subst`, so its placeholder reaches CMake verbatim out of any archive,
-and the branch it guards is dead. It is left as it is; the stamp above is what
-the archive path now runs on.
-
-Two consequences of archiving are worth knowing. Git stores no empty
-directories, so a directory whose only tracked file is caught by
-`.git* export-ignore` disappears from an archive altogether;
-`src/device_trezor/trezor/messages/`, the directory the Trezor protobuf sources
-are generated into, therefore keeps a placeholder file whose name matches no
-`export-ignore` pattern. And an archiver that copies the working tree instead of
-asking Git for its content substitutes nothing: `git-archive-all`, which the
-`source archive` CI job uses to produce its `--force-submodules` tarball, is one
-of those, so a binary built from that tarball still reports an unknown tag.
-
-### libudev, and a statically linked libusb or hidapi
-
-`cmake/FindLibUSB.cmake` and `cmake/FindHIDAPI.cmake` both add libudev to their
-library list when a static Linux build is configured, and both used to fall back
-to `message(WARNING "libudev library not found, binaries may fail to link.")`
-when it was absent. On a host whose libusb carries the udev backend that warning
-understates the situation: the build then ends, after every object has been
-compiled, at the first link step, with `undefined reference to
-udev_device_get_action@@LIBUDEV_183`.
-
-Both modules now separate that case from the ones where the warning is right.
-They ask `pkg-config` what `libusb-1.0` declares as its private static
-dependencies — `Libs.private`, which is what `pkg_check_modules` reports in its
-`_STATIC_LIBRARIES` variable — and when `udev` is named there and the platform
-is not FreeBSD, the archive about to be linked contains that backend, so the
-missing library is a hard error raised at configure time. The message names the
-package to install (`libudev-dev` on Debian and Ubuntu, `systemd-devel` on
-Fedora, `eudev-libudev-devel` on Void, `systemd-libs` on Arch) and the escape
-hatch `-DLIBUDEV_LIBRARY=<path to libudev>` for a libusb genuinely built without
-the udev backend. Every other case keeps the historical warning: FreeBSD, which
-has no udev; a host without `pkg-config`; and a libusb that does not name udev.
-`FindHIDAPI.cmake` runs the query against `libusb-1.0` rather than against
-hidapi, because hidapi's own `.pc` file declares no private dependencies and it
-is the libusb this module appends alongside it that brings the backend in.
-
-So libudev is a mandatory build dependency of exactly one configuration: a
-static Linux build that links the system libusb or hidapi. It is not needed for
-a shared build, nor for `contrib/depends`, whose hidapi is built without the
-udev backend — which is why the check is skipped when `DEPENDS` is set — nor on
-Android, which both modules exclude from the error, nor on FreeBSD.
-The `libudev` row of the dependency table in `README.md` states the same scope.
-
-### The cargo prerequisite
-
-`src/fcmp_pp/fcmp_pp_rust` is built unconditionally and its static library is
-linked into every executable, so a tree without a Rust toolchain builds nothing
-at all. The top-level `CMakeLists.txt` therefore resolves `cargo` and `rustc`
-before anything else needs them, runs `--version` on each to reject a toolchain
-that is present but not usable, reports both in the configure log, and on
-failure says what Rust is needed for and how to install it. Both are cache
-variables, so a toolchain outside `PATH` can be pointed at with
-`-DCARGO_EXECUTABLE=` and `-DRUSTC_EXECUTABLE=`.
-`src/fcmp_pp/fcmp_pp_rust/CMakeLists.txt` repeats the `cargo` lookup for the
-case where that directory is configured without the top-level guard having run,
-and invokes the resolved path rather than the bare name, so that a missing
-toolchain is still named at configure time instead of failing later as an
-unnamed executable inside a custom command. "Rust" above records which toolchain
-CI tests with.
 
 ## Use cases
 
@@ -466,231 +211,6 @@ Verify if the expected UTs are being properly executed with `F9` or select:
 If everything looks fine, then after setting some breakpoints of your choice, the target is ready for debugging in CB via:
 
 `Debug -> Start/Continue`
-
-## Running tests and binaries locally
-
-`tests/README.md` describes what each test suite covers and how it is invoked.
-This section covers the two things that are easy to get wrong when running
-them, or the binaries they exercise, on a development machine: the environment
-variables some tests are gated on, and the arguments the daemon and the
-blockchain utilities need in order to stay away from your real, mainnet data.
-
-### Environment variables the tests read
-
-| Variable | Read by | Effect |
-| --- | --- | --- |
-| `DNS_PUBLIC` | the DNS resolution path used by several suites | Set it to `tcp` before running the tests, as CI does, so DNS lookups go over TCP to a public resolver instead of depending on the local resolver |
-| `MONERO_TEST_DEVICE_HDD` | `is_hdd.rotational_drive` in `tests/unit_tests/is_hdd.cpp` | A path on a filesystem backed by a **rotational** disk. Unset, the case skips |
-| `MONERO_TEST_DEVICE_SSD` | `is_hdd.ssd` in `tests/unit_tests/is_hdd.cpp` | A path on a filesystem backed by a **non-rotational** disk. Unset, the case skips |
-
-Both device variables take a **filesystem path**, not a device node:
-`tools::is_hdd()` in `src/common/util.cpp` calls `stat()` on the path and reads
-`/sys/dev/block/<major>:<minor>/queue/rotational` (falling back to
-`.../../queue/rotational` for a partition), so a path that is not on a block
-device, or a device node with no mounted filesystem, makes the probe
-indeterminate rather than true or false. The probe logs which of those cases
-it hit at debug level, so run the binary under test at `--log-level 2` —
-`unit_tests` accepts that flag, as the daemon and the utilities do — to see
-lines such as `is_hdd: no rotational attribute for <path> ... - device kind
-unknown`. Level 1 is not enough: it selects `*:INFO`, and only level 2 turns
-on `*:DEBUG`.
-
-To find suitable values, list the mounted filesystems and the rotational flag
-of the device behind each one:
-
-```bash
-lsblk -o NAME,ROTA,MOUNTPOINT      # ROTA 1 is rotational, 0 is not
-findmnt -no SOURCE,TARGET          # which device is behind which path
-```
-
-Then export a mount point (or any directory under one) from the matching line,
-for example `MONERO_TEST_DEVICE_SSD=/tmp` on a host whose `/tmp` is on an
-SSD or in memory, and `MONERO_TEST_DEVICE_HDD=/mnt/spinning-disk` on a host
-that has one. On a machine or container with no rotational storage —
-which is the normal case for CI runners — leave `MONERO_TEST_DEVICE_HDD`
-unset: the skip is the correct outcome, and pointing the variable at a
-non-rotational or nonexistent path makes the case fail rather than skip.
-
-When running the `unit_tests` binary directly, pass the copy of the test data
-that the build produced, `--data-dir <build dir>/tests/data`, rather than the
-one in the source tree; some wallet suites write into that directory, and
-CTest itself passes the build copy. Run test binaries one at a time: several
-suites bind fixed loopback ports, so CI never passes `-j` to `ctest`.
-
-### Keeping local runs away from mainnet data
-
-Without `--data-dir`, every binary that opens a blockchain database uses the
-default data directory, which is the **mainnet** one — `~/.bitmonero` on Unix,
-as each utility's own `--help` shows. That applies to any invocation the
-argument parser accepts, including one whose only argument is an empty or
-nonsensical positional value: unknown *options* are rejected before anything
-happens, but a valid invocation with a junk positional argument falls through
-to the default data directory and performs its real operation there, creating
-or opening a mainnet LMDB. A smoke or fuzzing harness that runs these binaries
-with generated arguments will do this on every call unless it passes the flags
-below.
-
-Always pass the network, offline and data-directory flags — and note that the
-accepted set differs per binary, so a single blanket flag list does not work:
-
-| Binary | Flags to pass |
-| --- | --- |
-| `monerod` | `--testnet --offline --no-igd --data-dir <throwaway> [--log-file <path>]` |
-| `monero-wallet-rpc` | `--testnet --offline --wallet-dir <throwaway> --disable-rpc-login --log-file <path>` |
-| `monero-wallet-cli` | `--testnet --offline --wallet-file <throwaway>`; with no wallet argument it waits at an interactive prompt |
-| `monero-blockchain-import` | `--testnet --offline --data-dir <throwaway>` |
-| `monero-blockchain-{export,prune,prune-known-spent-data,stats,depth,ancestry}` | `--testnet --data-dir <throwaway>`; these do **not** accept `--offline` or `--no-igd` and reject them outright |
-| `monero-blockchain-usage` | `--testnet --input <throwaway>`; it has no `--data-dir` |
-
-`--offline` on the daemon prevents every peer-to-peer connection. For a
-deterministic local chain the functional tests use `--regtest` with
-`--fixed-difficulty` and add `--offline` to the instances that need no peers,
-which is the pattern to copy for any ad-hoc chain of your own.
-
-Logs need the same care as data directories. The blockchain utilities accept
-`--log-level` but not `--log-file`, and every one of these binaries writes
-`<binary name>.log` **next to the executable it was invoked as** — not into the
-current directory and not into the data directory. Running them out of
-`build/bin` therefore leaves log files there to clean up; invoking them through
-a symlink in a scratch directory puts the log beside the symlink instead.
-`monerod`, `monero-wallet-cli` and `monero-wallet-rpc` do accept `--log-file`,
-and it is worth passing: `monero-wallet-rpc` in particular grows its log
-quickly over a session.
-
-## Continuous integration
-
-`.github/workflows/build.yml` (the `ci/gh-actions/cli` workflow) runs on every
-push and every pull request, except when the change touches only `docs/**` or
-`**/README.md`: both triggers list those two patterns under `paths-ignore`, so
-a documentation-only change — including a change to this file — triggers none
-of the jobs below.
-
-### The jobs
-
-| Job | Where it runs | What it does |
-| --- | --- | --- |
-| `build-macos` (`macOS (brew)`) | `macOS-latest` | Installs dependencies with `brew install --quiet cmake boost hidapi openssl zmq unbound protobuf ccache`, builds, and runs the reduced test tier |
-| `build-windows` (`Windows (MSYS2)`) | `windows-latest`, every step in the `msys2 {0}` shell | Sets up `msys2/setup-msys2@v2` with `msystem: ucrt64` and installs the toolchain and libraries through `pacboy`, builds, and runs the reduced test tier |
-| `build-arch` (`Arch Linux`) | `archlinux:latest` container | Installs the rolling Arch toolchain and dependencies with `pacman -Syyu`, then configures and builds |
-| `build-linux` | a two-entry matrix of `debian:13` (`Debian 13`) and `ubuntu:24.04` (`Ubuntu 24.04`) containers | Installs the shared `APT_INSTALL_LINUX` list and Rust 1.93 through a checksum-pinned `rustup-init`, then configures and builds |
-| `test-ubuntu` (`Ubuntu 24.04 (tests)`) | `ubuntu:24.04` container, `--privileged` | The same dependencies plus the test harness' `pip` modules, then builds and runs the tests; the container is privileged because `tests/create_test_disks.sh` sets up loop devices |
-| `build-docker` (`Docker`) | `ubuntu-latest` | `docker build .`, which is what keeps the repository `Dockerfile` building |
-| `source-archive` (`source archive`) | `ubuntu:22.04` container | Produces the release source tarball with `git-archive-all --force-submodules` and uploads it as an artifact; it compiles nothing, which is why it stays on 22.04 while the compiling jobs moved forward |
-
-The five jobs that build the tree directly all run the same `BUILD_DEFAULT`
-command: a `cmake -S . -B build` configure with `-D ARCH="default"`,
-`-D BUILD_TESTS=ON`, `-D BUILD_GUI_DEPS=ON`, `-D ENABLE_FUZZ_TEST=ON` and
-`-D CMAKE_BUILD_TYPE=Release`, followed by `cmake --build build --target all`,
-with `USE_DEVICE_TREZOR_MANDATORY=ON` in the workflow environment. Each of
-them also restores a `ccache` cache keyed on its own operating system or
-container image, caps it at 150 MB, and saves it again only on pushes whose
-restore missed.
-
-### Which jobs run tests, and why serially
-
-`build-linux` and `build-arch` stop at `BUILD_DEFAULT`: they compile the test
-binaries but execute none of them, so a regression that only shows up when a
-test runs is not caught there. `test-ubuntu` is the only Linux job that runs
-tests — `ctest --test-dir build --output-on-failure -E core_tests` with
-`DNS_PUBLIC=tcp`, then the same command with `-R core_tests` in place of the
-exclusion; on a pull request that second run is preceded by a `--fresh`
-reconfigure and a rebuild of `core_tests` with
-`CFLAGS=-DMONERO_CRYPTO_SLOW_HASH_ITER=20`, which is what fits the consensus
-scenarios into a runner's time budget. `build-macos` and `build-windows` run
-the reduced tier instead, which excludes `functional_tests_rpc`, `core_tests`,
-`cnv4-jit`, `hash-variant2-int-sqrt` and `wide_difficulty` and filters out the
-DNS- and output-selection-dependent unit tests.
-
-No `ctest` invocation in the workflow is given `-j`, and none should be:
-several tests bind fixed loopback ports — the `epee_boosted_tcp_server` unit
-tests use 5626, `net_load_tests` uses 36230 and 36231, and the
-`functional_tests_rpc` harness starts daemons and wallets on fixed ports from
-18090 upwards — so suites running concurrently would collide on them. Test
-parallelism is not the same knob as the build parallelism below.
-
-### What the dependency lists enable
-
-Two groups of packages in the shared dependency lists are there for what they
-add to the build and test graph rather than for the daemon itself, and both are
-easy to leave out of a local install and then wonder what is missing:
-
-- `libreadline-dev` in `APT_INSTALL_LINUX`, and `readline` on the Arch
-  `pacman` line, are what let `find_package(Readline)` succeed in the root
-  build. Without them it reports "Could not find GNU readline library so
-  building without readline support" and `contrib/epee/src/CMakeLists.txt`
-  gates out the `epee_readline` and `obj_epee_readline` targets, so the
-  readline-backed CLI input path in `contrib/epee/src/readline_buffer.cpp` is
-  compiled by nothing.
-- `python3 python3-requests python3-zmq python3-deepdiff` in
-  `APT_INSTALL_LINUX`, and the corresponding
-  `python3 python-requests python-pyzmq python-deepdiff` on the Arch `pacman`
-  line, satisfy the `import requests`, `import zmq` and `import deepdiff`
-  probe in `tests/functional_tests/CMakeLists.txt`. Without them that file
-  emits a `CMake Warning`, adds `functional_tests_rpc` and
-  `check_missing_rpc_methods` to `CTEST_CUSTOM_TESTS_IGNORE`, and registers
-  neither test. `test-ubuntu` additionally installs `requests`, `psutil`,
-  `monotonic`, `zmq` and `deepdiff` with `pip`; with the apt packages in
-  place `pip` reports `requests`, `pyzmq` and `deepdiff` already satisfied
-  and installs only `psutil` and `monotonic`, neither of which this tree
-  imports — the test harness uses `time.monotonic()` from the standard
-  library.
-  These three modules are test tooling and nothing else: they are
-  imported by `utils/python-rpc/framework/rpc.py` and `framework/zmq.py` and by
-  the scenarios under `tests/functional_tests/`, and by no daemon, wallet or
-  library this repository builds, so their versions bear on the test run and on
-  nothing that ships. The probe requires no version, only that the imports
-  succeed; the combination the suite has been run with here is Python 3.13.7
-  with requests 2.33.1, pyzmq 27.2.0 and deepdiff 9.1.0.
-
-With both groups present, a configure of the CI configuration emits no
-`CMake Warning`, `ctest --test-dir build -N` lists 24 tests including those
-two, and the build reaches 124 `Built target` lines with a compile database of
-453 entries of which 321 are C++23 — the counts to compare a local build
-against. They hold only where these packages are installed: without readline
-two of those targets and one of those entries are simply absent, and without
-the python modules two of those tests are never registered.
-
-### Build parallelism
-
-Each of the five building jobs calls `./.github/actions/set-make-job-count`
-first. The action budgets one logical core and 2.25 GiB of memory per compile
-job and sets `MAKE_JOB_COUNT` to `max(1, min(nproc, MemTotal / 2.25 GiB))`,
-reading `/proc/meminfo` and `nproc` on Linux and in the MSYS2 shell and
-`sysctl hw.memsize` and `hw.logicalcpu` on macOS. The jobs then pass that
-value to the build as `CMAKE_BUILD_PARALLEL_LEVEL`, so a runner with less
-memory than it has cores compiles with fewer jobs instead of being OOM-killed.
-The same rule is a reasonable starting point for choosing `-j` or
-`--parallel` locally.
-
-### Which floors continuous integration exercises
-
-The "Toolchain requirements" section above states the floors and the status of
-each; this is where that status comes from, because which floor a job actually
-compiles with is not obvious from the job names.
-
-- **GCC** is the only family exercised continuously. The two `build-linux`
-  containers and `test-ubuntu` build with the distribution GCC of Debian 13
-  and Ubuntu 24.04 — the two GCC rows of the matrix above — and `build-arch`
-  builds with Arch's rolling GCC, far newer than the floor.
-- **Apple Clang** is exercised only as whatever compiler `macOS-latest`
-  currently ships, which is newer than the published Apple Clang 15 floor. The
-  floor version itself is enforced by the configure-time compiler guard in the
-  root `CMakeLists.txt`, and no job compiles the tree with it. Demonstrating
-  it needs a pinned Xcode 15.x, which exists only on the `macos-14`
-  runner-image family or on developer hardware, and that image family is being
-  retired — so the opportunity to demonstrate it on a hosted runner is
-  time-limited.
-- **MinGW-w64 GCC** is exercised only by `build-windows`, in the MSYS2
-  `ucrt64` environment, and its `pacboy` packages are a rolling toolchain
-  rather than a pinned one: the UCRT64 repository currently ships GCC 16.2.0,
-  CMake 4.4.3 and Boost 1.92.0, comfortably above the published MinGW-w64
-  GCC 13 and CMake 3.25 floors and newer than any Boost release the matrix
-  above discusses. What that job establishes is therefore that the current
-  UCRT64 toolchain builds the tree, not that the floor version does.
-- **Clang on Linux has no job at all.** Nothing in the workflow compiles the
-  tree with Clang: that floor is enforced by the configure-time guard, and the
-  Clang rows of the matrix above were measured by local builds rather than by
-  CI, so the matrix and not CI is the statement of which Clang pairings work.
 
 ## To be done (and merged):
 ### Multihost parallel compilation

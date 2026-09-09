@@ -1,7 +1,0 @@
-# Placeholder that keeps this directory alive in Git and in source archives.
-#
-# cmake/CheckTrezor.cmake generates the Trezor protobuf sources into this
-# directory at configure time, and protoc does not create its output directory.
-# Git stores no empty directories, and .gitattributes marks .git* export-ignore,
-# so the .gitignore beside this file cannot keep the directory in an archive.
-# This file, whose name matches no export-ignore pattern, does.

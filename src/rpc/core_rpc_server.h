@@ -256,11 +256,7 @@ private:
 
     core& m_core;
     nodetool::node_server<cryptonote::t_cryptonote_protocol_handler<cryptonote::core> >& m_p2p;
-    // Every method gate in the URI and JSON-RPC maps above reads this flag, so it fails closed:
-    // an instance whose init() has not run, or has returned early, answers as a restricted
-    // server instead of reading an indeterminate value. init() overwrites it with the caller's
-    // choice as its first statement.
-    bool m_restricted = true;
+    bool m_restricted;
     epee::critical_section m_host_fails_score_lock;
     std::map<std::string, uint64_t> m_host_fails_score;
     bool disable_rpc_ban;

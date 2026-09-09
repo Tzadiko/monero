@@ -1,7 +1,2 @@
 # protobuf generated code
 *
-# ... but keep the placeholder that keeps this directory itself in Git, and
-# therefore in released source archives. cmake/CheckTrezor.cmake generates the
-# protobuf sources ignored above into this directory and protoc does not create
-# it, so the directory has to exist before the build is configured.
-!.keep

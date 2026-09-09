@@ -2191,7 +2191,6 @@ namespace wallet_rpc
   {
     struct request_t
     {
-      // Wallet name inside --wallet-dir: required (non-empty), no path separator and no embedded NUL.
       std::string filename;
       std::string password;
       std::string language;
@@ -2216,7 +2215,6 @@ namespace wallet_rpc
   {
     struct request_t
     {
-      // Wallet name inside --wallet-dir: required (non-empty), no path separator and no embedded NUL.
       std::string filename;
       std::string password;
       bool autosave_current;
@@ -2284,8 +2282,6 @@ namespace wallet_rpc
     struct request
     {
       uint64_t restore_height;
-      // Wallet name inside --wallet-dir: no path separator and no embedded NUL. Optional: an empty
-      // name yields an in-memory wallet that is not written to disk.
       std::string filename;
       std::string address;
       std::string spendkey;
@@ -2323,8 +2319,6 @@ namespace wallet_rpc
     struct request_t
     {
       uint64_t restore_height;
-      // Wallet name inside --wallet-dir: no path separator and no embedded NUL. Optional: an empty
-      // name yields an in-memory wallet that is not written to disk.
       std::string filename;
       std::string seed;
       std::string seed_offset;

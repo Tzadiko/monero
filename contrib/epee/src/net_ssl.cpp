@@ -28,18 +28,8 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <algorithm>
-#include <cstdio>
-#include <cstring>
-#include <fcntl.h>
 #include <string.h>
 #include <thread>
-#if defined(_WIN32)
-  #include <io.h>
-  #include <sys/stat.h>
-#else
-  #include <sys/stat.h>
-  #include <unistd.h>
-#endif
 #include <boost/asio/post.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -162,50 +152,6 @@ namespace
 
     return pkey;
 #endif
-  }
-
-  /*! Opens `path` for writing, creating it and failing if anything is already
-      there, and never following a symbolic link.
-
-      store_ssl_keys() writes a TLS private key, and the ordinary "open for
-      writing" of std::fopen truncates whatever the name resolves to. A symbolic
-      link planted at the key's path therefore turns key generation into an
-      arbitrary file overwrite with the daemon's privileges (CWE-59), and a
-      surviving file from an earlier run is destroyed rather than reported.
-      O_CREAT | O_EXCL | O_NOFOLLOW in one open() removes both, without a
-      check-then-open window. Callers of store_ssl_keys() only reach it when the
-      key, certificate and fingerprint files are all absent, so O_EXCL does not
-      change any working path: it turns a silent overwrite into a diagnostic.
-
-      \return an open stream, or nullptr with errno set (EEXIST when the name is
-              taken, ELOOP when it is a symbolic link). */
-  std::FILE *fopen_new_exclusive(const std::string& path)
-  {
-#if defined(_WIN32)
-    // Windows has no O_NOFOLLOW; _O_EXCL still refuses an existing name, which is
-    // what stops a planted reparse point from being written through.
-    const int fd = ::_open(path.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
-#else
-    const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
-#endif
-    if (fd < 0)
-      return nullptr;
-#if defined(_WIN32)
-    std::FILE *file = ::_fdopen(fd, "wb");
-#else
-    std::FILE *file = ::fdopen(fd, "wb");
-#endif
-    if (!file)
-    {
-      const int fdopen_errno = errno;
-#if defined(_WIN32)
-      ::_close(fd);
-#else
-      ::close(fd);
-#endif
-      errno = fdopen_errno;
-    }
-    return file;
   }
 }
 
@@ -713,23 +659,16 @@ boost::system::error_code store_ssl_keys(boost::asio::ssl::context& ssl, const b
   // write key file unencrypted
   {
     const boost::filesystem::path key_file{base.string() + ".key"};
-    file.reset(fopen_new_exclusive(key_file.string()));
+    file.reset(std::fopen(key_file.string().c_str(), "wb"));
     if (!file)
     {
-      const int open_errno = errno;
-      if (open_errno == EEXIST || epee::file_io_utils::is_file_exist(key_file.string())) {
-        MERROR("Refusing to overwrite existing SSL private key file: '" << key_file.string() << "'");
-      }
-#if !defined(_WIN32)
-      else if (open_errno == ELOOP) {
-        MERROR("Refusing to write the SSL private key through the symbolic link: '" << key_file.string() << "'");
-      }
-#endif
-      else {
+      if (epee::file_io_utils::is_file_exist(key_file.string())) {
+        MERROR("Permission denied to overwrite SSL private key file: '" << key_file.string() << "'");
+      } else {
         MERROR("Could not open SSL private key file for writing: '" << key_file.string() << "'");
       }
 
-      return {open_errno, boost::system::system_category()};
+      return {errno, boost::system::system_category()};
     }
     boost::filesystem::permissions(key_file, boost::filesystem::owner_read, error);
     if (error)
@@ -742,13 +681,9 @@ boost::system::error_code store_ssl_keys(boost::asio::ssl::context& ssl, const b
 
   // write certificate file in standard SSL X.509 unencrypted
   const boost::filesystem::path cert_file{base.string() + ".crt"};
-  file.reset(fopen_new_exclusive(cert_file.string()));
+  file.reset(std::fopen(cert_file.string().c_str(), "wb"));
   if (!file)
-  {
-    const int open_errno = errno;
-    MERROR("Could not create SSL certificate file '" << cert_file.string() << "': " << std::strerror(open_errno));
-    return {open_errno, boost::system::system_category()};
-  }
+    return {errno, boost::system::system_category()};
   const auto cert_perms = (boost::filesystem::owner_read | boost::filesystem::group_read | boost::filesystem::others_read);
   boost::filesystem::permissions(cert_file, cert_perms, error);
   if (error)
@@ -760,13 +695,9 @@ boost::system::error_code store_ssl_keys(boost::asio::ssl::context& ssl, const b
 
   // write SHA-256 fingerprint file
   const boost::filesystem::path fp_file{base.string() + ".fingerprint"};
-  file.reset(fopen_new_exclusive(fp_file.string()));
+  file.reset(std::fopen(fp_file.string().c_str(), "w"));
   if (!file)
-  {
-    const int open_errno = errno;
-    MERROR("Could not create SSL fingerprint file '" << fp_file.string() << "': " << std::strerror(open_errno));
-    return {open_errno, boost::system::system_category()};
-  }
+    return {errno, boost::system::system_category()};
   const auto fp_perms = (boost::filesystem::owner_read | boost::filesystem::group_read | boost::filesystem::others_read);
   boost::filesystem::permissions(fp_file, fp_perms, error);
   if (error)

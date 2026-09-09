@@ -101,12 +101,6 @@ endif()
 # rather than C or it would be compiled as C and fail. ASM is enabled by
 # enable_language(C ASM) in the root build. The object is byte-identical; the
 # file simply leaves the C/CXX compiler-launcher (ccache) path.
-#
-# This object carries no x86 CET property, which is why the executables that
-# link it do not advertise IBT/SHSTK; adding -fcf-protection=full here does not
-# change that, because gcc emits no property for assembler input and produces a
-# byte-identical object either way. The root CMakeLists.txt comment above
-# add_c_flag_if_supported(-fcf-protection=full ...) records the full picture.
 set_property(SOURCE CryptonightR_template.S PROPERTY LANGUAGE ASM)
 set_property(SOURCE CryptonightR_template.S PROPERTY XCODE_EXPLICIT_FILE_TYPE sourcecode.asm)
 

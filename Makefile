@@ -32,25 +32,7 @@ ifneq ($(dotgit), .git/config)
 endif
 
 subbuilddir:=$(shell echo  `uname | sed -e 's|[:/\\ \(\)]|_|g'`/`git branch | grep '\* ' | cut -f2- -d' '| sed -e 's|[:/\\ \(\)]|_|g'`)
-
-# USE_SINGLE_BUILDDIR picks the layout the shortcuts below build in: off keeps the
-# default per-platform, per-branch tree build/<uname>/<branch>, on puts every
-# configuration in a single build/ tree. It is switched on automatically above when
-# .git/config is missing (a source archive), where there is no branch name to build a
-# per-branch path from. The value is interpreted, not merely tested for presence:
-# 0/n/no/off/false in any of the spellings below - and empty or unset - mean off, any
-# other non-empty value (1, y, yes, true, on, ...) means on.
-single_builddir_off_values := 0 n N no No NO off Off OFF false False FALSE
-single_builddir := $(filter-out $(single_builddir_off_values),$(strip $(USE_SINGLE_BUILDDIR)))
-# Without a branch name - a source archive, or a tree git cannot read - the per-branch
-# path collapses to build/<uname>/ and $(topdir) then points above the source root, so
-# the single build directory is the only workable layout and is used regardless of the
-# value above. This also covers a value given on the make command line, which overrides
-# the assignment made above for the same case.
-ifeq ($(patsubst %/,,$(subbuilddir)),)
-  single_builddir := 1
-endif
-ifeq ($(strip $(single_builddir)),)
+ifeq ($(USE_SINGLE_BUILDDIR),)
   builddir := build/"$(subbuilddir)"
   topdir   := ../../../..
   deldirs  := $(builddir)
@@ -123,13 +105,13 @@ fuzz:
 clean:
 	@echo "WARNING: Back-up your wallet if it exists within ./"$(deldirs)"!" ; \
     read -r -p "This will destroy the build directory, continue (y/N)?: " CONTINUE; \
-	[ "$$CONTINUE" = "y" ] || [ "$$CONTINUE" = "Y" ] || (echo "Exiting."; exit 1;)
+	[ $$CONTINUE = "y" ] || [ $$CONTINUE = "Y" ] || (echo "Exiting."; exit 1;)
 	rm -rf $(deldirs)
 
 clean-all:
 	@echo "WARNING: Back-up your wallet if it exists within ./build!" ; \
 	read -r -p "This will destroy all build directories, continue (y/N)?: " CONTINUE; \
-	[ "$$CONTINUE" = "y" ] || [ "$$CONTINUE" = "Y" ] || (echo "Exiting."; exit 1;)
+	[ $$CONTINUE = "y" ] || [ $$CONTINUE = "Y" ] || (echo "Exiting."; exit 1;)
 	rm -rf ./build
 
 .PHONY: all cmake-debug debug debug-test debug-test-asan debug-asan debug-all cmake-release release release-test release-all fuzz clean

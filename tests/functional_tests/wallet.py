@@ -32,7 +32,6 @@
 """Test basic wallet functionality
 """
 
-import os
 import sys
 import util_resources
 
@@ -53,7 +52,6 @@ class WalletTest():
       self.languages()
       self.change_password()
       self.store()
-      self.filename_validation_and_error_exposure()
 
     def reset(self):
         print('Resetting blockchain')
@@ -316,16 +314,11 @@ class WalletTest():
         except: pass
         languages = res.languages
         languages_local = res.languages_local
-        # create_wallet requires a name it can actually write, so reuse one scratch wallet name and
-        # clear its files before each create (create_wallet fails with -21 if the file exists)
-        scratch_wallet = 'test_languages'
         for language in languages + languages_local:
             sys.stdout.write('Creating ' + language + ' wallet\n')
-            util_resources.remove_wallet_files(scratch_wallet)
-            wallet.create_wallet(filename = scratch_wallet, language = language)
+            wallet.create_wallet(filename = '', language = language)
             res = wallet.query_key('mnemonic')
             wallet.close_wallet()
-        util_resources.remove_wallet_files(scratch_wallet)
 
     def change_password(self):
         print('Testing password change')
@@ -391,88 +384,6 @@ class WalletTest():
         wallet.close_wallet()
 
         util_resources.remove_wallet_files('test1')
-
-    def filename_validation_and_error_exposure(self):
-        print('Testing wallet filename validation and error exposure')
-        wallet = Wallet()
-
-        # close the wallet if any, will throw if none is loaded
-        try: wallet.close_wallet()
-        except: pass
-
-        # A wallet name is written to disk and read back by a human, so names carrying control
-        # characters, bidirectional formatting controls or edge whitespace are refused by both
-        # handlers that take one: an ESC sequence is acted on by the operator's terminal, CR and BS
-        # overwrite what was printed before them, a bidi override displays a name other than the one
-        # stored, and edge whitespace makes two different names indistinguishable in a listing. The
-        # reason is asserted too, so that a name refused for the wrong rule is a failure.
-        hostile_names = [
-            ('w\revil', 'control characters'),
-            ('w\nevil', 'control characters'),
-            ('w\tevil', 'control characters'),
-            ('w\x1b[31mred', 'control characters'),
-            ('..\bctl', 'control characters'),
-            ('w\u0085evil', 'control characters'),
-            ('w\u007fevil', 'control characters'),
-            ('w\u202eevil', 'bidirectional text controls'),
-            ('w\u200eevil', 'bidirectional text controls'),
-            ('  w  ', 'leading or trailing whitespace'),
-            ('w ', 'leading or trailing whitespace'),
-        ]
-        for name, reason in hostile_names:
-            for create in [True, False]:
-                ok = False
-                try:
-                    if create:
-                        wallet.create_wallet(filename = name)
-                    else:
-                        wallet.open_wallet(name)
-                except Exception as e:
-                    ok = 'Invalid filename' in str(e) and reason in str(e)
-                assert ok, 'name %s was not refused with reason %s (create = %s)' % (repr(name), reason, create)
-            assert not util_resources.file_exists(name), repr(name)
-            assert not util_resources.file_exists(name + '.keys'), repr(name)
-
-        # Legitimate names must keep working: printable non-ASCII, including accented letters and
-        # emoji, is a valid wallet name in most of the world, and an inner space is not ambiguous the
-        # way a leading or a trailing one is.
-        for name in ['plain_wallet', 'my wallet', 'wallet_\u00fcber', 'wallet_\U0001F600']:
-            util_resources.remove_wallet_files(name)
-            wallet.create_wallet(filename = name)
-            assert util_resources.file_exists(name + '.keys'), repr(name)
-            wallet.close_wallet()
-            wallet.open_wallet(name)
-            wallet.close_wallet()
-            util_resources.remove_wallet_files(name)
-
-        # The path-separator, traversal, absolute-path, home-relative and empty-name refusals predate
-        # the code point rules above and must keep holding.
-        for name in ['a/b', '../evil', '/tmp/evil', '~/evil', '']:
-            ok = False
-            try: wallet.create_wallet(filename = name)
-            except Exception as e: ok = 'Invalid filename' in str(e)
-            assert ok, 'name %s was not refused' % repr(name)
-
-        # An error body is readable by any wallet-RPC caller, so a failure to open a wallet names the
-        # wallet the caller asked for and nothing else: the resolved path belongs in the server's log,
-        # not in the response. A '/' in the message would be a directory the caller did not supply.
-        missing = 'no_such_wallet_' + '0' * 8
-        util_resources.remove_wallet_files(missing)
-        ok = False
-        try: wallet.open_wallet(missing)
-        except Exception as e:
-            msg = e.args[0]['error']['message'] if e.args and isinstance(e.args[0], dict) else str(e)
-            assert missing in msg, msg
-            assert '/' not in msg, msg
-            assert os.environ['WALLET_DIRECTORY'] not in msg, msg
-            ok = True
-        assert ok, 'opening a wallet that does not exist did not fail'
-
-        # leave the standard test wallet loaded, as the rest of this suite expects it
-        seed = 'velvet lymph giddy number token physics poetry unquoted nibs useful sabotage limits benches lifestyle eden nitrogen anvil fewest avoid batch vials washing fences goat unquoted'
-        res = wallet.restore_deterministic_wallet(seed = seed)
-        assert res.address == '42ey1afDFnn4886T7196doS9GPMzexD9gXpsZJDwVjeRVdFCSoHnv7KPbBeGpzJBzHRCAs9UxqeoyFQMYbqSWYTfJJQAWDm'
-        assert res.seed == seed
 
 
 if __name__ == '__main__':

@@ -71,6 +71,4 @@ add_test(
   NAME    libwallet_api_tests
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/libwallet_api_tests.py" "${CMAKE_BINARY_DIR}" "$<TARGET_FILE:daemon>" "$<TARGET_FILE:libwallet_api_tests>")
 
-# The gtest phase alone needs ~193 s, before daemon startup and mining 90 regtest blocks
-# are counted, so the former 240 s left this row no margin on a contended host.
-set_tests_properties(libwallet_api_tests PROPERTIES TIMEOUT 1800)
+set_tests_properties(libwallet_api_tests PROPERTIES TIMEOUT 240)

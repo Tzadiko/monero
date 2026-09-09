@@ -29,24 +29,11 @@
 // Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
 #include <atomic>
-#include <cerrno>
 #include <chrono>
-#include <cstdint>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
 #include <functional>
-#include <iostream>
 #include <numeric>
-#include <string>
 #include <boost/thread/thread.hpp>
 #include <vector>
-
-#ifndef _WIN32
-// getrlimit(RLIMIT_NOFILE) is POSIX and absent on MinGW, where the descriptor ceiling is
-// simply reported as unavailable by the host-capacity pre-flight below.
-#include <sys/resource.h>
-#endif
 
 #include "gtest/gtest.h"
 
@@ -62,214 +49,10 @@ using namespace net_load_tests;
 
 namespace
 {
-  // Scale of the load exercise. The compiled-in default is unchanged, so CI and dedicated
-  // soak hosts behave exactly as before, but the value the tests use is resolved once at
-  // run time (see resolve_connection_count() and main()): a host whose ephemeral port
-  // range or descriptor ceiling cannot supply this many simultaneous loopback connections
-  // can request a scale it does supply instead of only ever exhausting itself.
-  const size_t DEFAULT_CONNECTION_COUNT = 100000;
-  const char* const CONNECTION_COUNT_OPTION = "--connection-count=";
-  const char* const CONNECTION_COUNT_ENV = "MONERO_NET_LOAD_TESTS_CONNECTION_COUNT";
-
-  // Written exactly once, by main(), before RUN_ALL_TESTS starts a test and therefore
-  // before any test thread exists; every later access is a read. A plain size_t is
-  // consequently safe here and keeps the ~15 references in the TEST_F bodies unchanged.
-  size_t CONNECTION_COUNT = DEFAULT_CONNECTION_COUNT;
-
-  // Ceiling on simultaneously opened connections in the permament_open_and_close_* cases.
-  // Held here, rather than in those two test bodies, because main() has to reject a
-  // requested connection count that does not exceed it: the helper only starts closing
-  // connections once the ceiling is reached, so a smaller request would leave
-  // opened_connection_count() below MAX_OPENED_CONN_COUNT and fail those cases.
-  const size_t MAX_OPENED_CONN_COUNT = 100;
-
+  const size_t CONNECTION_COUNT = 100000;
   constexpr const std::chrono::seconds CONNECTION_TIMEOUT{10};
   const size_t DEFAULT_OPERATION_TIMEOUT = 30000;
   const size_t RESERVED_CONN_CNT = 1;
-
-  // Parses a strictly positive decimal connection count. Rejects anything else - empty,
-  // signed, non-numeric, trailing garbage, zero, or too large for size_t - so a typo is
-  // reported rather than silently turning into a different load.
-  bool parse_connection_count(const std::string& value, size_t& count)
-  {
-    if (value.empty() || std::string::npos != value.find_first_not_of("0123456789"))
-      return false;
-
-    unsigned long long parsed = 0;
-    try
-    {
-      parsed = std::stoull(value);
-    }
-    catch (const std::exception&)
-    {
-      return false; // std::out_of_range: the value does not fit unsigned long long
-    }
-
-    // Round-trip instead of a range comparison, so the check is correct and warning-free
-    // both where size_t is as wide as unsigned long long and where it is narrower.
-    if (0 == parsed || parsed != static_cast<unsigned long long>(static_cast<size_t>(parsed)))
-      return false;
-
-    count = static_cast<size_t>(parsed);
-    return true;
-  }
-
-  // Resolves the load scale from the --connection-count=N option and the
-  // MONERO_NET_LOAD_TESTS_CONNECTION_COUNT environment variable, the option winning when
-  // both are given, and falling back to the compiled-in default when neither is. Returns
-  // false, having reported what is wrong with the requested value, in which case the
-  // caller must run no test rather than run at a value nobody asked for.
-  bool resolve_connection_count(int argc, char** argv, size_t& count)
-  {
-    count = DEFAULT_CONNECTION_COUNT;
-
-    std::string value;
-    std::string source;
-    if (const char* const env_value = std::getenv(CONNECTION_COUNT_ENV))
-    {
-      value = env_value;
-      source = CONNECTION_COUNT_ENV;
-    }
-
-    const size_t option_length = std::strlen(CONNECTION_COUNT_OPTION);
-    for (int i = 1; i < argc; ++i)
-    {
-      if (nullptr != argv[i] && 0 == std::strncmp(argv[i], CONNECTION_COUNT_OPTION, option_length))
-      {
-        value = argv[i] + option_length;
-        source = CONNECTION_COUNT_OPTION;
-      }
-    }
-
-    if (source.empty())
-      return true;
-
-    // Rejections go to std::cerr rather than through the logger: this is a usage error of
-    // the executable itself, and the harness's default log configuration routes the
-    // "default" category away from the console, where the operator is reading.
-    size_t requested = 0;
-    if (!parse_connection_count(value, requested))
-    {
-      std::cerr << "net_load_tests_clt: invalid connection count '" << value << "' from " << source
-        << ": expected a positive integer greater than " << MAX_OPENED_CONN_COUNT << ". Set the scale with "
-        << CONNECTION_COUNT_OPTION << "N or " << CONNECTION_COUNT_ENV << "=N; the default is "
-        << DEFAULT_CONNECTION_COUNT << ". No test was run." << std::endl;
-      return false;
-    }
-
-    if (requested <= MAX_OPENED_CONN_COUNT)
-    {
-      std::cerr << "net_load_tests_clt: connection count " << requested << " from " << source
-        << " is too small: it must exceed MAX_OPENED_CONN_COUNT (" << MAX_OPENED_CONN_COUNT
-        << "), which the permament_open_and_close_* cases require to be reached. Set the scale with "
-        << CONNECTION_COUNT_OPTION << "N or " << CONNECTION_COUNT_ENV << "=N; the default is "
-        << DEFAULT_CONNECTION_COUNT << ". No test was run." << std::endl;
-      return false;
-    }
-
-    count = requested;
-    return true;
-  }
-
-  // Host-capacity pre-flight. Every simultaneous loopback connection needs a distinct
-  // ephemeral port for its 4-tuple and a descriptor in this process (and another in the
-  // server process), so a scale above either ceiling exhausts the host long before the
-  // assertions can mean anything - previously as an opaque stall. The requested value is
-  // never clamped: the numbers and the way to lower them are reported and the run
-  // proceeds, because a soak host with widened sysctls is exactly where it should proceed.
-  void log_host_capacity_preflight(size_t connection_count)
-  {
-    MGINFO("net_load_tests_clt pre-flight: connection count " << connection_count
-      << " (compiled-in default " << DEFAULT_CONNECTION_COUNT << "; override with "
-      << CONNECTION_COUNT_OPTION << "N or " << CONNECTION_COUNT_ENV << "=N)");
-
-#ifndef _WIN32
-    struct rlimit nofile = {};
-    if (0 == getrlimit(RLIMIT_NOFILE, &nofile))
-    {
-      if (RLIM_INFINITY == nofile.rlim_cur)
-      {
-        MGINFO("net_load_tests_clt pre-flight: open descriptor limit (RLIMIT_NOFILE soft) unlimited");
-      }
-      else
-      {
-        const uint64_t soft_limit = static_cast<uint64_t>(nofile.rlim_cur);
-        MGINFO("net_load_tests_clt pre-flight: open descriptor limit (RLIMIT_NOFILE soft) " << soft_limit);
-        if (soft_limit <= static_cast<uint64_t>(connection_count) + RESERVED_CONN_CNT)
-        {
-          // The "global" category at INFO is what reaches the console under this harness's
-          // default log configuration, so the capacity warnings are logged there, coloured
-          // and prefixed, rather than at WARNING level where they would be invisible.
-          MGINFO_RED("net_load_tests_clt pre-flight WARNING: " << connection_count << " connections need more than the "
-            << soft_limit << " descriptors this process may open, so connect_async will start failing with EMFILE. "
-            "Raise the limit (ulimit -n) or lower the scale with " << CONNECTION_COUNT_OPTION << "N or "
-            << CONNECTION_COUNT_ENV << "=N.");
-        }
-      }
-    }
-    else
-    {
-      MGINFO("net_load_tests_clt pre-flight: open descriptor limit unavailable, getrlimit(RLIMIT_NOFILE) failed: "
-        << std::strerror(errno));
-    }
-#else
-    MGINFO("net_load_tests_clt pre-flight: open descriptor limit unavailable on this platform");
-#endif
-
-    // Read rather than #ifdef'd away: a platform without this /proc file just skips the line.
-    std::ifstream port_range("/proc/sys/net/ipv4/ip_local_port_range");
-    uint64_t first_port = 0;
-    uint64_t last_port = 0;
-    if (port_range >> first_port >> last_port && first_port <= last_port)
-    {
-      const uint64_t usable_ports = last_port - first_port + 1;
-      MGINFO("net_load_tests_clt pre-flight: ephemeral port range " << first_port << "-" << last_port << ", "
-        << usable_ports << " usable");
-      if (usable_ports < static_cast<uint64_t>(connection_count))
-      {
-        MGINFO_RED("net_load_tests_clt pre-flight WARNING: " << connection_count << " simultaneous loopback connections need "
-          << connection_count << " distinct ephemeral ports but only " << usable_ports
-          << " exist, so connect_async will start failing with EADDRNOTAVAIL. Widen "
-          "net.ipv4.ip_local_port_range or lower the scale with " << CONNECTION_COUNT_OPTION << "N or "
-          << CONNECTION_COUNT_ENV << "=N.");
-      }
-    }
-    else
-    {
-      MGINFO("net_load_tests_clt pre-flight: ephemeral port range unavailable, "
-        "/proc/sys/net/ipv4/ip_local_port_range could not be read");
-    }
-
-    // The per-process ceiling above is not the only descriptor limit: fs.file-max caps the
-    // whole host, and on a shared machine most of it may already be spoken for. Each loopback
-    // connection consumes one descriptor in this process and one in the server process, so the
-    // budget needed is twice the scale. /proc/sys/fs/file-nr reports allocated, free-but-
-    // allocated and the maximum in that order; a platform without the file just skips the line.
-    std::ifstream file_nr("/proc/sys/fs/file-nr");
-    uint64_t allocated_files = 0;
-    uint64_t unused_files = 0;
-    uint64_t max_files = 0;
-    if (file_nr >> allocated_files >> unused_files >> max_files && allocated_files <= max_files)
-    {
-      const uint64_t available_files = max_files - allocated_files;
-      const uint64_t needed_files = 2 * static_cast<uint64_t>(connection_count);
-      MGINFO("net_load_tests_clt pre-flight: host-wide descriptors (fs.file-nr) " << allocated_files
-        << " of " << max_files << " allocated, " << available_files << " available");
-      if (available_files < needed_files)
-      {
-        MGINFO_RED("net_load_tests_clt pre-flight WARNING: " << connection_count << " connections need about "
-          << needed_files << " host-wide descriptors (one per endpoint of each connection) but only "
-          << available_files << " are available, so accept and connect will start failing with ENFILE. "
-          "Raise fs.file-max or lower the scale with " << CONNECTION_COUNT_OPTION << "N or "
-          << CONNECTION_COUNT_ENV << "=N.");
-      }
-    }
-    else
-    {
-      MGINFO("net_load_tests_clt pre-flight: host-wide descriptor budget unavailable, "
-        "/proc/sys/fs/file-nr could not be read");
-    }
-  }
 
   template<typename t_predicate>
   bool busy_wait_for(size_t timeout_ms, const t_predicate& predicate, size_t sleep_ms = 10)
@@ -313,7 +96,7 @@ namespace
         {
           m_error_count.fetch_add(1, std::memory_order_relaxed);
         }
-      }, "0.0.0.0", test_ssl_support);
+      });
 
       if (!r)
       {
@@ -373,7 +156,7 @@ namespace
         {
           m_error_count.fetch_add(1, std::memory_order_relaxed);
         }
-      }, "0.0.0.0", test_ssl_support);
+      });
 
       if (!r)
       {
@@ -414,7 +197,7 @@ namespace
       m_tcp_server.get_config_object().set_handler(&m_commands_handler);
       m_tcp_server.get_config_object().m_invoke_timeout = CONNECTION_TIMEOUT;
 
-      ASSERT_TRUE(m_tcp_server.init_server(clt_port, "127.0.0.1", "", "::", false, true, test_ssl_support));
+      ASSERT_TRUE(m_tcp_server.init_server(clt_port, "127.0.0.1"));
       ASSERT_TRUE(m_tcp_server.run_server(m_thread_count, false));
 
       // Connect to server
@@ -430,7 +213,7 @@ namespace
           LOG_ERROR("Connection error: " << ec.message());
         }
         conn_status.store(1, std::memory_order_seq_cst);
-      }, "0.0.0.0", test_ssl_support));
+      }));
 
       EXPECT_TRUE(busy_wait_for(DEFAULT_OPERATION_TIMEOUT, [&]{ return 0 != conn_status.load(std::memory_order_seq_cst); })) << "connect_async timed out";
       ASSERT_EQ(1, conn_status.load(std::memory_order_seq_cst));
@@ -462,7 +245,7 @@ namespace
       tcp_server.get_config_object().set_handler(commands_handler_ptr, [](epee::levin::levin_commands_handler<test_connection_context> *handler)->void { delete handler; });
       tcp_server.get_config_object().m_invoke_timeout = CONNECTION_TIMEOUT;
 
-      if (!tcp_server.init_server(clt_port, "127.0.0.1", "", "::", false, true, test_ssl_support)) return;
+      if (!tcp_server.init_server(clt_port, "127.0.0.1")) return;
       if (!tcp_server.run_server(2, false)) return;
 
       // Connect to server and invoke shutdown command
@@ -471,7 +254,7 @@ namespace
       tcp_server.connect_async("127.0.0.1", srv_port, CONNECTION_TIMEOUT, [&](const test_connection_context& context, const boost::system::error_code& ec) {
         cmd_context = context;
         conn_status.store(!ec ? 1 : -1, std::memory_order_seq_cst);
-      }, "0.0.0.0", test_ssl_support);
+      });
 
       if (!busy_wait_for(DEFAULT_OPERATION_TIMEOUT, [&]{ return 0 != conn_status.load(std::memory_order_seq_cst); })) return;
       if (1 != conn_status.load(std::memory_order_seq_cst)) return;
@@ -700,6 +483,8 @@ TEST_F(net_load_test_clt, a_lot_of_client_connections_and_connections_closed_by_
 
 TEST_F(net_load_test_clt, permament_open_and_close_and_connections_closed_by_client)
 {
+  static const size_t MAX_OPENED_CONN_COUNT = 100;
+
   // Open/close connections
   t_connection_opener_2 connection_opener(m_tcp_server, CONNECTION_COUNT, MAX_OPENED_CONN_COUNT);
   parallel_exec([&] {
@@ -756,6 +541,8 @@ TEST_F(net_load_test_clt, permament_open_and_close_and_connections_closed_by_cli
 
 TEST_F(net_load_test_clt, permament_open_and_close_and_connections_closed_by_server)
 {
+  static const size_t MAX_OPENED_CONN_COUNT = 100;
+
   // Init test
   std::atomic<int> test_state(0);
   CMD_START_OPEN_CLOSE_TEST::request req_start;
@@ -848,15 +635,6 @@ int main(int argc, char** argv)
   mlog_configure(mlog_get_default_log_path("net_load_tests_clt.log"), true);
 
   ::testing::InitGoogleTest(&argc, argv);
-
-  // InitGoogleTest has removed gtest's own flags from argv, so what is left is this
-  // harness's options. The scale is resolved before RUN_ALL_TESTS creates any thread,
-  // which is what makes the plain size_t CONNECTION_COUNT safe to read from the tests.
-  if (!resolve_connection_count(argc, argv, CONNECTION_COUNT))
-    return 1;
-
-  log_host_capacity_preflight(CONNECTION_COUNT);
-
   return RUN_ALL_TESTS();
   CATCH_ENTRY_L0("main", 1);
 }

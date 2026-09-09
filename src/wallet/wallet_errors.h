@@ -30,14 +30,10 @@
 
 #pragma once
 
-#include <cstddef>
 #include <stdexcept>
 #include <system_error>
 #include <string>
-#include <typeinfo>
 #include <vector>
-
-#include <boost/core/demangle.hpp>
 
 #include "cryptonote_basic/cryptonote_format_utils.h"
 #include "cryptonote_core/cryptonote_tx_utils.h"
@@ -111,130 +107,15 @@ namespace tools
     // * - class with protected ctor
 
     //----------------------------------------------------------------------------------------------------
-    // True for the characters that separate the components of a path on this platform. ':' is not
-    // included: it separates a drive from a path on Windows rather than one component from the next,
-    // and the leaf of "C:name" is "name" either way.
-    inline bool is_path_separator(char c)
-    {
-      return c == '/'
-#ifdef _WIN32
-          || c == '\\'
-#endif
-      ;
-    }
-    //----------------------------------------------------------------------------------------------------
-    // Final component of a path, i.e. the file name with every directory above it removed.
-    //
-    // The errors below are constructed with a fully resolved path, because that is what the wallet
-    // actually opened, but their message reaches an unauthenticated wallet-RPC caller verbatim:
-    // wallet_rpc_server copies what() into the JSON-RPC error body. To that caller the directories
-    // above the file describe the server's filesystem layout and nothing else, while the leaf is the
-    // name the caller itself supplied. So what() carries the leaf and to_string(), which is what
-    // throw_wallet_ex logs on the server, carries the resolved path in full: the operator reading the
-    // log loses nothing and the remote caller learns nothing about the layout.
-    //
-    // Trailing separators are dropped before the leaf is taken, so "dir/wallet/" names "wallet"
-    // instead of falling back to the whole string. A path that is nothing but separators has no leaf
-    // and yields an empty string, which is deliberately not a fallback to the full path.
-    inline std::string file_leaf(const std::string &file)
-    {
-      std::size_t end = file.size();
-      while (end != 0 && is_path_separator(file[end - 1]))
-        --end;
-      std::size_t begin = end;
-      while (begin != 0 && !is_path_separator(file[begin - 1]))
-        --begin;
-      return file.substr(begin, end - begin);
-    }
-    //----------------------------------------------------------------------------------------------------
-    // Length of the build tree's own prefix, derived from this header's __FILE__ at compile time.
-    //
-    // The THROW_WALLET_EXCEPTION macros record the throw site as __FILE__ ":" __LINE__, and the build
-    // system compiles this tree with absolute source paths, so every recorded location starts with
-    // the directory the wallet happened to be built in. That directory is a property of the build
-    // machine, not of the wallet, and it ends up in an operator-readable log line; the length
-    // computed here is what has to come off the front of the location to leave the repository path.
-    // This header's own path always ends with src/wallet/wallet_errors.h, which is what makes the
-    // prefix recoverable without any build-system cooperation.
-    inline std::size_t source_root_prefix_length()
-    {
-      static const char suffix[] = "src/wallet/wallet_errors.h";
-      const std::string self(__FILE__);
-      const std::size_t n = sizeof(suffix) - 1;
-      if (self.size() >= n && self.compare(self.size() - n, n, suffix) == 0)
-        return self.size() - n;
-      return 0;
-    }
-    //----------------------------------------------------------------------------------------------------
-    // A throw location reduced to a repository-relative path, so that the log line names the source
-    // file a reader can look up and not the layout of the machine the binary was built on.
-    //
-    // Four cases, in order: the location is already relative and needs nothing done to it; it starts
-    // with this build tree's prefix and that prefix comes off; it was compiled from some other tree
-    // whose prefix is unknown, in which case everything up to the last top-level source directory is
-    // dropped; or the path resembles none of those and only its file name is kept, so that no build
-    // layout can reach the log through this function.
-    inline std::string short_location(const std::string &loc)
-    {
-      static const char *const relative_roots[] = {"src/", "contrib/", "tests/", "external/"};
-      for (const char *root : relative_roots)
-      {
-        if (loc.rfind(root, 0) == 0)  // rfind at position 0 is the prefix test
-          return loc;
-      }
-      const std::size_t prefix = source_root_prefix_length();
-      if (prefix != 0 && loc.size() > prefix && loc.compare(0, prefix, std::string(__FILE__), 0, prefix) == 0)
-        return loc.substr(prefix);
-      static const char *const absolute_roots[] = {"/src/", "/contrib/", "/tests/", "/external/"};
-      for (const char *root : absolute_roots)
-      {
-        const std::size_t at = loc.rfind(root);
-        if (at != std::string::npos)
-          return loc.substr(at + 1);
-      }
-      const std::size_t slash = loc.find_last_of('/');
-      return slash == std::string::npos ? loc : loc.substr(slash + 1);
-    }
-    //----------------------------------------------------------------------------------------------------
-    // The unqualified name of an error type, readable by a human.
-    //
-    // typeid(...).name() is implementation-defined and on the Itanium ABI it is the mangled name
-    // (N5tools5error16invalid_passwordE), which tells an operator nothing and exposes the internal
-    // template structure of the error hierarchy. Demangling gives tools::error::invalid_password;
-    // the template arguments and the namespace qualification are then dropped because the error name
-    // alone is what identifies the failure in a log line. The trailing 'struct '/'class ' strip
-    // covers ABIs whose demangled spelling carries an elaborated type specifier, so a non-Itanium
-    // platform degrades to the same short name instead of a decorated one.
-    inline std::string short_type_name(const std::type_info &type)
-    {
-      std::string name = boost::core::demangle(type.name());
-      const std::size_t args = name.find('<');
-      if (args != std::string::npos)
-        name.erase(args);
-      const std::size_t scope = name.rfind("::");
-      if (scope != std::string::npos)
-        name.erase(0, scope + 2);
-      const std::size_t space = name.rfind(' ');
-      if (space != std::string::npos)
-        name.erase(0, space + 1);
-      return name;
-    }
-    //----------------------------------------------------------------------------------------------------
     template<typename Base>
     struct wallet_error_base : public Base
     {
       const std::string& location() const { return m_loc; }
 
-      // The formatted diagnostic every THROW_WALLET_EXCEPTION site logs through throw_wallet_ex.
-      // The throw location is reduced to a repository-relative path and the dynamic type to its
-      // unqualified name (see short_location and short_type_name): a build-host directory and a
-      // mangled implementation type name are information exposure in an operator-readable log and
-      // neither helps the reader. location() keeps returning the location as it was recorded, for
-      // any caller that wants it unmodified.
       std::string to_string() const
       {
         std::ostringstream ss;
-        ss << short_location(m_loc) << ':' << short_type_name(typeid(*this)) << ": " << Base::what();
+        ss << m_loc << ':' << typeid(*this).name() << ": " << Base::what();
         return ss.str();
       }
 
@@ -376,27 +257,20 @@ namespace tools
     struct file_error_base : public wallet_logic_error
     {
       explicit file_error_base(std::string&& loc, const std::string& file)
-        : wallet_logic_error(std::move(loc), std::string(file_error_messages[msg_index]) +  " \"" + file_leaf(file) + '\"')
+        : wallet_logic_error(std::move(loc), std::string(file_error_messages[msg_index]) +  " \"" + file + '\"')
         , m_file(file)
       {
       }
 
       explicit file_error_base(std::string&& loc, const std::string& file, const std::error_code &e)
-        : wallet_logic_error(std::move(loc), std::string(file_error_messages[msg_index]) +  " \"" + file_leaf(file) + "\": " + e.message())
+        : wallet_logic_error(std::move(loc), std::string(file_error_messages[msg_index]) +  " \"" + file + "\": " + e.message())
         , m_file(file)
       {
       }
 
       const std::string& file() const { return m_file; }
 
-      // what() names the leaf only (see file_leaf); the resolved path is appended here, where it
-      // reaches the server's own log through throw_wallet_ex and not the RPC caller.
-      std::string to_string() const
-      {
-        std::ostringstream ss;
-        ss << wallet_logic_error::to_string() << ", file = " << m_file;
-        return ss.str();
-      }
+      std::string to_string() const { return wallet_logic_error::to_string(); }
 
     private:
       std::string m_file;
@@ -1040,23 +914,14 @@ namespace tools
     struct wallet_files_doesnt_correspond : public wallet_logic_error
     {
       explicit wallet_files_doesnt_correspond(std::string&& loc, const std::string& keys_file, const std::string& wallet_file)
-        : wallet_logic_error(std::move(loc), "file " + file_leaf(wallet_file) + " does not correspond to " + file_leaf(keys_file))
-        , m_keys_file(keys_file)
-        , m_wallet_file(wallet_file)
+        : wallet_logic_error(std::move(loc), "file " + wallet_file + " does not correspond to " + keys_file)
       {
       }
 
       const std::string& keys_file() const { return m_keys_file; }
       const std::string& wallet_file() const { return m_wallet_file; }
 
-      // As file_error_base: the message a remote caller can read names the two leaves, the server's
-      // log line names both resolved paths.
-      std::string to_string() const
-      {
-        std::ostringstream ss;
-        ss << wallet_logic_error::to_string() << ", wallet file = " << m_wallet_file << ", keys file = " << m_keys_file;
-        return ss.str();
-      }
+      std::string to_string() const { return wallet_logic_error::to_string(); }
 
     private:
       std::string m_keys_file;
@@ -1117,23 +982,9 @@ namespace tools
     struct background_wallet_already_open : public background_sync_error
     {
       explicit background_wallet_already_open(std::string&& loc, const std::string& background_wallet_file)
-        : background_sync_error(std::move(loc), "background wallet " + file_leaf(background_wallet_file) + " is already opened by another wallet program")
-        , m_background_wallet_file(background_wallet_file)
+        : background_sync_error(std::move(loc), "background wallet " + background_wallet_file + " is already opened by another wallet program")
       {
       }
-
-      const std::string& background_wallet_file() const { return m_background_wallet_file; }
-
-      // As file_error_base: the leaf in what(), the resolved path in the server's log line.
-      std::string to_string() const
-      {
-        std::ostringstream ss;
-        ss << background_sync_error::to_string() << ", background wallet file = " << m_background_wallet_file;
-        return ss.str();
-      }
-
-    private:
-      std::string m_background_wallet_file;
     };
     //----------------------------------------------------------------------------------------------------
     struct background_custom_password_same_as_wallet_password : public background_sync_error

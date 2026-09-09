@@ -60,12 +60,6 @@ if (REQUESTS_OUTPUT STREQUAL "OK")
   add_test(
     NAME    check_missing_rpc_methods
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/check_missing_rpc_methods.py" "${CMAKE_SOURCE_DIR}")
-  # This suite runs five daemons and seven wallets on fixed loopback ports 18090-18484 and
-  # opens tens of thousands of connections, so only one copy of it can be in flight on a
-  # host. The lock it shares with unit_tests - the other suite that binds loopback sockets -
-  # keeps the two from overlapping under `ctest -j`. It does not affect a serial run.
-  set_tests_properties(functional_tests_rpc PROPERTIES
-    RESOURCE_LOCK monero_loopback_sockets)
 else()
   message(WARNING "functional_tests_rpc and check_missing_rpc_methods skipped, needs the 'requests', 'zmq', and 'deepdiff' python modules")
   set(CTEST_CUSTOM_TESTS_IGNORE ${CTEST_CUSTOM_TESTS_IGNORE} functional_tests_rpc check_missing_rpc_methods)

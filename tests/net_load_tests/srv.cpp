@@ -28,8 +28,6 @@
 // 
 // Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
-#include <memory>
-
 #include <boost/asio/steady_timer.hpp>
 #include <boost/thread/mutex.hpp>
 #include <boost/thread/thread.hpp>
@@ -62,25 +60,10 @@ namespace
 
       //std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
-      // The helper reference is taken under the mutex and the mutex is released before calling
-      // into it, because handle_new_connection closes a connection through the server's config
-      // object, which takes epee's connection-map lock, while on_connection_close below is
-      // invoked by epee with that same map lock already held and then takes this mutex. Holding
-      // this mutex across the close inverts the two locks: measured here at scale 101, every one
-      // of the server's io threads ended up parked in futex_wait with no timeout and no further
-      // log line, the client's next command timed out (LEVIN_ERROR_CONNECTION_TIMEDOUT) and the
-      // server had to be killed. The shared_ptr copy keeps the helper alive for the call even if
-      // on_connection_close releases it concurrently.
-      std::shared_ptr<open_close_test_helper> open_close_test_helper_ref;
+      boost::unique_lock<boost::mutex> lock(m_open_close_test_mutex);
+      if (!m_open_close_test_conn_id.is_nil())
       {
-        boost::unique_lock<boost::mutex> lock(m_open_close_test_mutex);
-        if (!m_open_close_test_conn_id.is_nil())
-          open_close_test_helper_ref = m_open_close_test_helper;
-      }
-
-      if (open_close_test_helper_ref)
-      {
-        EXIT_ON_ERROR(open_close_test_helper_ref->handle_new_connection(context.m_connection_id, true));
+        EXIT_ON_ERROR(m_open_close_test_helper->handle_new_connection(context.m_connection_id, true));
       }
     }
 
@@ -93,7 +76,7 @@ namespace
       {
         LOG_PRINT_L0("Stop open/close test");
         m_open_close_test_conn_id = boost::uuids::nil_uuid();
-        m_open_close_test_helper.reset();
+        m_open_close_test_helper.reset(0);
       }
     }
 
@@ -135,12 +118,12 @@ namespace
     int handle_start_open_close_test(int command, const CMD_START_OPEN_CLOSE_TEST::request& req, CMD_START_OPEN_CLOSE_TEST::response&, test_connection_context& context)
     {
       boost::unique_lock<boost::mutex> lock(m_open_close_test_mutex);
-      if (!m_open_close_test_helper)
+      if (0 == m_open_close_test_helper.get())
       {
         LOG_PRINT_L0("Start open/close test (" << req.open_request_target << ", " << req.max_opened_conn_count << ")");
 
         m_open_close_test_conn_id = context.m_connection_id;
-        m_open_close_test_helper = std::make_shared<open_close_test_helper>(m_tcp_server, req.open_request_target, req.max_opened_conn_count);
+        m_open_close_test_helper.reset(new open_close_test_helper(m_tcp_server, req.open_request_target, req.max_opened_conn_count));
         return 1;
       }
       else
@@ -184,19 +167,6 @@ namespace
   private:
     void close_connections(boost::uuids::uuid cmd_conn_id)
     {
-      // A retry chain must not outlive the command connection that started it. The server serves
-      // every test case of one client run, so a chain armed by an earlier CMD_CLOSE_ALL_CONNECTIONS
-      // would still be firing during a later case, and since the connection it spares is identified
-      // by the id captured when it was armed, it would close that later case's command connection -
-      // observed here as the client's next invoke failing with LEVIN_ERROR_CONNECTION_TIMEDOUT and
-      // the case failing on stale server statistics. Once the requester is gone the test that asked
-      // for the close is over, so there is nothing left to retry.
-      if (!m_tcp_server.get_config_object().for_connection(cmd_conn_id, [](test_connection_context&) { return true; }))
-      {
-        LOG_PRINT_L0("Not closing connections: the requesting connection " << cmd_conn_id << " is gone");
-        return;
-      }
-
       LOG_PRINT_L0("Closing connections. Number of opened connections: " << m_tcp_server.get_config_object().get_connections_count());
 
       size_t count = 0;
@@ -207,15 +177,7 @@ namespace
           if (!ctx.m_closed)
           {
             ctx.m_closed = true;
-            // Non-waiting close: this runs inside an io_context handler - the CMD_CLOSE_ALL_CONNECTIONS
-            // command handler and the retry timer below - and close(..., true) blocks the calling thread
-            // for up to five seconds per connection waiting for a shutdown sequence that itself needs an
-            // io_context thread to run. Blocking the handler thread therefore starves the very work it
-            // waits for: the mass close took over twenty seconds for a hundred connections here, the
-            // client's concurrent CMD_GET_STATISTICS exceeded its invoke timeout, and epee destroyed the
-            // command connection, after which the test could no longer query the server at all.
-            // terminate_async() still runs and on_connection_close still updates the statistics.
-            m_tcp_server.get_config_object().close(ctx.m_connection_id, false);
+            m_tcp_server.get_config_object().close(ctx.m_connection_id, true);
           }
           else
           {
@@ -249,9 +211,7 @@ namespace
 
     boost::uuids::uuid m_open_close_test_conn_id;
     boost::mutex m_open_close_test_mutex;
-    // shared_ptr rather than unique_ptr so that on_connection_new can hold a reference to the
-    // helper while the mutex that guards it is released - see the comment there.
-    std::shared_ptr<open_close_test_helper> m_open_close_test_helper;
+    std::unique_ptr<open_close_test_helper> m_open_close_test_helper;
   };
 }
 
@@ -265,7 +225,7 @@ int main(int argc, char** argv)
   size_t thread_count = (std::max)(min_thread_count, boost::thread::hardware_concurrency() / 2);
 
   test_tcp_server tcp_server(epee::net_utils::e_connection_type_RPC);
-  if (!tcp_server.init_server(srv_port, "127.0.0.1", "", "::", false, true, test_ssl_support))
+  if (!tcp_server.init_server(srv_port, "127.0.0.1"))
     return 1;
 
   srv_levin_commands_handler *commands_handler = new srv_levin_commands_handler(tcp_server);

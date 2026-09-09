@@ -141,24 +141,23 @@ The following table summarizes the tools and libraries required to build. A few 
 | ----------- | ---------------------------------------------------------------------------------- | -------- | ------------------- | ------------ | ----------------- | ------------------- | -------- | -------------------------------------------------------------- |
 | GCC         | 13                                                                                 | NO       | `build-essential`   | `base-devel` | `base-devel`      | `gcc`               | NO       |                                                                |
 | CMake       | 3.25                                                                               | NO       | `cmake`             | `cmake`      | `cmake`           | `cmake`             | NO       |                                                                |
-| pkg-config  | any                                                                                | NO       | `pkgconf`           | `base-devel` | `base-devel`      | `pkgconf`           | NO       |                                                                |
+| pkg-config  | any                                                                                | NO       | `pkg-config`        | `base-devel` | `base-devel`      | `pkgconf`           | NO       |                                                                |
 | Rust        | any stable that builds `src/fcmp_pp/fcmp_pp_rust`; 1.93 is the CI-tested toolchain | NO       | `rustup`            | `rust`       | `rust cargo`      | `rust cargo`        | NO       | FCMP++ library                                                 |
-| Boost       | 1.69                                                                               | NO       | `libboost-all-dev`  | `boost`      | `boost-devel`     | `boost-devel`       | NO       | C++ libraries (declared; 1.88.0 verified, 1.83 in CI)          |
-| OpenSSL     | 1.1.1                                                                              | NO       | `libssl-dev`        | `openssl`    | `openssl-devel`   | `openssl-devel`     | NO       | cryptography (C API; 3.5.3 verified, 3.5.7 in depends)         |
+| Boost       | 1.69                                                                               | NO       | `libboost-all-dev`  | `boost`      | `boost-devel`     | `boost-devel`       | NO       | C++ libraries (declared; 1.83 and 1.91.0 verified under C++23) |
+| OpenSSL     | 1.1.1                                                                              | NO       | `libssl-dev`        | `openssl`    | `openssl-devel`   | `openssl-devel`     | NO       | cryptography (C API; 3.0.13 verified, 3.5.7 pinned in depends) |
 | libzmq      | 4.2.0                                                                              | NO       | `libzmq3-dev`       | `zeromq`     | `zeromq-devel`    | `zeromq-devel`      | NO       | ZeroMQ library                                                 |
 | libunbound  | 1.4.16                                                                             | NO       | `libunbound-dev`    | `unbound`    | `unbound-devel`   | `unbound-devel`     | NO       | DNS resolver                                                   |
-| libsodium   | any                                                                                | NO       | `libsodium-dev`     | `libsodium`  | `libsodium-devel` | `libsodium-devel`   | NO       | cryptography (any; 1.0.18 verified and pinned in depends)      |
-| libunwind   | any                                                                                | NO       | `libunwind-dev`     | `libunwind`  | `libunwind-devel` | `libunwind-devel`   | YES      | Stack traces (non-Release builds with a non-GNU compiler)      |
+| libsodium   | ?                                                                                  | NO       | `libsodium-dev`     | `libsodium`  | `libsodium-devel` | `libsodium-devel`   | NO       | cryptography                                                   |
+| libunwind   | any                                                                                | NO       | `libunwind-dev`     | `libunwind`  | `libunwind-devel` | `libunwind-devel`   | YES      | Stack traces                                                   |
 | libreadline | 6.3.0                                                                              | NO       | `libreadline-dev`   | `readline`   | `readline-devel`  | `readline-devel`    | YES      | Input editing                                                  |
 | GTest       | 1.5                                                                                | YES      | `libgtest-dev`      | `gtest`      | `gtest-devel`     | `gtest-devel`       | YES      | Test suite                                                     |
 | ccache      | any                                                                                | NO       | `ccache`            | `ccache`     | `ccache`          | `ccache`            | YES      | Compil. cache                                                  |
 | Doxygen     | any                                                                                | NO       | `doxygen`           | `doxygen`    | `doxygen`         | `doxygen`           | YES      | Documentation                                                  |
 | Graphviz    | any                                                                                | NO       | `graphviz`          | `graphviz`   | `graphviz`        | `graphviz`          | YES      | Documentation                                                  |
-| libhidapi   | any                                                                                | NO       | `libhidapi-dev`     | `hidapi`     | `hidapi-devel`    | `hidapi-devel`      | YES      | Hardware wallet (any; 0.14.0 verified, 0.15.0 in depends)      |
-| libusb      | 1.0.16                                                                             | NO       | `libusb-1.0-0-dev`  | `libusb`     | `libusb-devel`    | `libusb1-devel`     | YES      | Hardware wallet (1.0.29 verified, 1.0.30 in depends)           |
-| libudev     | any                                                                                | NO       | `libudev-dev`       | `systemd-libs` | `eudev-libudev-devel` | `systemd-devel`     | YES      | udev backend of a statically linked libusb/libhidapi           |
-| libprotobuf | any, matching protoc                                                               | NO       | `libprotobuf-dev`   | `protobuf`   | `protobuf-devel`  | `protobuf-devel`    | YES      | Hardware wallet (3.21.12 verified; same release in depends)    |
-| protoc      | any, matching libprotobuf                                                          | NO       | `protobuf-compiler` | `protobuf`   | `protobuf`        | `protobuf-compiler` | YES      | Hardware wallet (3.21.12 verified; same release in depends)    |
+| libhidapi   | ?                                                                                  | NO       | `libhidapi-dev`     | `hidapi`     | `hidapi-devel`    | `hidapi-devel`      | YES      | Hardware wallet                                                |
+| libusb      | ?                                                                                  | NO       | `libusb-1.0-0-dev`  | `libusb`     | `libusb-devel`    | `libusb1-devel`     | YES      | Hardware wallet                                                |
+| libprotobuf | ?                                                                                  | NO       | `libprotobuf-dev`   | `protobuf`   | `protobuf-devel`  | `protobuf-devel`    | YES      | Hardware wallet                                                |
+| protoc      | ?                                                                                  | NO       | `protobuf-compiler` | `protobuf`   | `protobuf`        | `protobuf-compiler` | YES      | Hardware wallet                                                |
 
 Rust and `cargo` are required on `master`. Install them with rustup (as CI
 does) on every platform, or from the distribution package where one is named
@@ -170,17 +169,9 @@ Monero is compiled as C++23 and requires GCC 13, Clang 16, Apple Clang 15
 standard-library pairings are GCC with libstdc++ 13 or 14, Clang 16 with
 libstdc++ 13, and Clang 18 with libstdc++ 14 (Boost 1.84 or newer for a
 warning-clean build). Clang 16 with libstdc++ 14 does not compile the tree,
-and Clang with libc++ is not a verified pairing. Those pairings were built
-against Boost 1.88.0; Boost 1.83, the version the Debian 13 and Ubuntu 24.04
-CI images ship, is covered by CI rather than by a local build, and the 1.91.0
-that `contrib/depends` pins is covered by the cross-build gate. Two
-third-party diagnostics are documented rather than suppressed: Boost 1.83 or
-older emits one Beast deprecation with Clang 18 or newer, and the protobuf
-21.12 recipe pinned for the deterministic cross-build emits
-`-Wdeprecated-enum-enum-conversion` from its own headers on every depends
-host, without `-Werror` and so without affecting the build. The full
-compatibility matrix — the authoritative statement of the floors, of which
-pairings are verified, and of the evidence behind each one — is the
+and Clang with libc++ is not a verified pairing. The full compatibility
+matrix — the authoritative statement of the floors, of which pairings are
+verified, and of the evidence behind each one — is the
 ["Toolchain requirements"](docs/COMPILING_DEBUGGING_TESTING.md#toolchain-requirements)
 section of
 [docs/COMPILING_DEBUGGING_TESTING.md](docs/COMPILING_DEBUGGING_TESTING.md).
@@ -188,24 +179,13 @@ section of
 Install all dependencies at once on Debian/Ubuntu:
 
 ```
-sudo apt update && sudo apt install build-essential cmake pkgconf libssl-dev libzmq3-dev libunbound-dev libsodium-dev libunwind-dev libreadline-dev libhidapi-dev libusb-1.0-0-dev libudev-dev libprotobuf-dev protobuf-compiler libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libboost-regex-dev libboost-serialization-dev libboost-system-dev libboost-thread-dev python3 python3-requests python3-zmq python3-deepdiff ccache doxygen graphviz git curl
+sudo apt update && sudo apt install build-essential cmake pkg-config libssl-dev libzmq3-dev libunbound-dev libsodium-dev libunwind-dev libreadline-dev libhidapi-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libboost-regex-dev libboost-serialization-dev libboost-system-dev libboost-thread-dev python3 ccache doxygen graphviz git curl
 ```
 
 That command installs the system dependencies only: Rust and `cargo` are
 mandatory on `master` and are not among them, and the `rustc` and `cargo`
 packaged by Debian and Ubuntu are older than the toolchain CI tests with, so
 install the toolchain through rustup.
-
-The three `python3-*` packages provide the modules the functional tests
-import. Without them CMake configures with a warning and silently skips
-`functional_tests_rpc` and `check_missing_rpc_methods`, so `ctest -N` reports
-22 registered tests instead of 24. They are test tooling only — the harness
-under `tests/functional_tests/` and the client in `utils/python-rpc/` import
-them, and no daemon, wallet or library built here does — and no version is
-required: the suite has been run with Python 3.13.7, requests 2.33.1, pyzmq
-27.2.0 and deepdiff 9.1.0. `libudev-dev` is only needed for
-statically linked builds (`make release-static`, `-DSTATIC=ON`), where the
-udev backend of the system libusb and libhidapi archives has to be linked in.
 
 Install all dependencies at once on Arch:
 ```
@@ -220,7 +200,7 @@ sudo dnf install gcc gcc-c++ cmake pkgconf boost-devel openssl-devel zeromq-deve
 Install all dependencies at once on openSUSE:
 
 ```
-sudo zypper ref && sudo zypper in cppzmq-devel libboost_chrono-devel libboost_date_time-devel libboost_filesystem-devel libboost_locale-devel libboost_program_options-devel libboost_regex-devel libboost_serialization-devel libboost_thread-devel libsodium-devel libunwind-devel unbound-devel cmake doxygen ccache fdupes gcc-c++ libevent-devel libopenssl-devel pkgconf-pkg-config readline-devel rust cargo patterns-devel-C-C++-devel_C_C++
+sudo zypper ref && sudo zypper in cppzmq-devel libboost_chrono-devel libboost_date_time-devel libboost_filesystem-devel libboost_locale-devel libboost_program_options-devel libboost_regex-devel libboost_serialization-devel libboost_system-devel libboost_thread-devel libsodium-devel libunwind-devel unbound-devel cmake doxygen ccache fdupes gcc-c++ libevent-devel libopenssl-devel pkgconf-pkg-config readline-devel rust cargo patterns-devel-C-C++-devel_C_C++
 ```
 
 Install all dependencies at once on macOS with the provided Brewfile:
@@ -270,9 +250,9 @@ Monero uses the CMake build system and a top-level [Makefile](Makefile) that inv
 
     *Note*: The instructions above will compile the most stable release of the Monero software. If you would like to use and test the most recent software, use `git checkout master`. The master branch may contain updates that are both unstable and incompatible with release software, though testing is always encouraged.
 
-* The resulting executables can be found in `build/<uname>/<branch>/release/bin`, which on Linux for the recipe above is `build/Linux/release-v0.18/release/bin` (passing `USE_SINGLE_BUILDDIR=1` to `make` puts them in `build/release/bin` instead)
+* The resulting executables can be found in `build/release/bin`
 
-* Add `PATH="$PATH:$HOME/monero/build/<uname>/<branch>/release/bin"` to `.profile`, substituting the directory from the previous step
+* Add `PATH="$PATH:$HOME/monero/build/release/bin"` to `.profile`
 
 * Run Monero with `monerod --detach`
 
@@ -397,7 +377,7 @@ Binaries for Windows can be built on Windows using the MinGW toolchain within [M
     make release-static -j $(nproc)
     ```
 
-   The resulting executables can be found in `build/<uname>/<branch>/release/bin`, where `<uname>` is what `uname` prints in the MSYS2 shell, or in `build/release/bin` if you pass `USE_SINGLE_BUILDDIR=1` to `make`
+   The resulting executables can be found in `build/release/bin`
 
 * **Optional**: to build Windows binaries suitable for debugging, run:
 
@@ -405,7 +385,7 @@ Binaries for Windows can be built on Windows using the MinGW toolchain within [M
     make debug -j $(nproc)
     ```
 
-   The resulting executables can be found in `build/<uname>/<branch>/debug/bin`, or in `build/debug/bin` if you pass `USE_SINGLE_BUILDDIR=1` to `make`
+   The resulting executables can be found in `build/debug/bin`
 
 ### On FreeBSD:
 

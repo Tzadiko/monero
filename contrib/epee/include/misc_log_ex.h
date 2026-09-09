@@ -32,7 +32,6 @@
 
 #include <sstream>
 #include <string>
-#include <string_view>
 
 #include "easylogging++.h"
 
@@ -218,95 +217,6 @@ enum console_colors
 bool is_stdout_a_tty();
 void set_console_color(int color, bool bright);
 void reset_console_color();
-
-//! Default cap, in input bytes, applied by \ref sanitize_for_log to a single logged value.
-constexpr std::size_t MAX_LOG_VALUE_LENGTH = 1024;
-
-/*! \brief Neutralise a caller-supplied value so it can be logged as a single log entry.
-
-  Log entries are written one per physical line and the file layout is tab separated
-  (`%datetime\t%thread\t%level\t%logger\t%loc\t%msg`), so a value that still holds a
-  newline, a carriage return or a tab when it reaches a log sink lets whoever supplied
-  that value split one logical entry into several physical lines, or forge extra fields
-  inside one line - CWE-117, improper output neutralization for logs. Raw bytes at or
-  above 0x80 additionally make the log file non-text, which defeats ordinary tooling
-  (`grep` needs `-a`) and can render as unrelated glyphs on an operator's terminal.
-
-  This function converts any byte sequence into printable 7-bit ASCII, so that the
-  result cannot terminate a line, cannot introduce a field separator and cannot carry a
-  terminal escape sequence:
-    - `\` becomes `\\`, which makes the transformation reversible and unambiguous;
-    - LF, CR and TAB become the two-character mnemonics `\n`, `\r` and `\t`;
-    - every other byte below 0x20, plus 0x7F and every byte at or above 0x80, becomes
-      `\xNN` with uppercase hexadecimal digits;
-    - printable ASCII (0x20 to 0x7E, `\` excepted) is passed through unchanged.
-
-  At most \p max_length input bytes are transformed; a longer value is truncated and the
-  marker `...[truncated, N bytes total]` - naming the true input length - is appended, so
-  that an unbounded caller-supplied value cannot be used to flood the log.
-
-  It must be applied at the log call site, to the caller-supplied value only, and never
-  to the surrounding message text: wrapping the message as a whole would escape the
-  characters the log format itself relies on. Typical use:
-  \code
-    MERROR("[SendRawTxHex]: Failed to parse tx from hexbuff: " << epee::sanitize_for_log(req.tx_as_hex));
-  \endcode
-
-  \param value The untrusted value, treated as an opaque byte sequence; it may hold
-    embedded NULs and need not be valid UTF-8.
-  \param max_length Maximum number of input bytes transformed before truncation.
-  \return The escaped value, guaranteed to contain only printable ASCII (0x20 to 0x7E)
-    and therefore no line break, no tab and no non-ASCII byte.
-  \note Throws only if the output allocation fails; the transformation itself cannot fail.
-*/
-inline std::string sanitize_for_log(const std::string_view value, const std::size_t max_length = MAX_LOG_VALUE_LENGTH)
-{
-  static constexpr const char hex_digits[] = "0123456789ABCDEF";
-  static constexpr const char truncation_prefix[] = "...[truncated, ";
-  static constexpr const char truncation_suffix[] = " bytes total]";
-
-  const std::size_t kept_size = value.size() < max_length ? value.size() : max_length;
-  const std::string_view kept = value.substr(0, kept_size);
-  const bool truncated = kept_size < value.size();
-
-  std::string out;
-  // Worst case is four output characters (`\xNN`) per input byte; reserving that up
-  // front means exactly one allocation, whatever the input looks like. kept_size is
-  // bounded by max_length, so the reservation is bounded too.
-  out.reserve((kept_size * 4) + (truncated ? sizeof(truncation_prefix) + sizeof(truncation_suffix) + 20 : 0));
-
-  for (const char c : kept)
-  {
-    const unsigned char byte = static_cast<unsigned char>(c);
-    switch (byte)
-    {
-      case '\\': out += "\\\\"; continue;
-      case '\n': out += "\\n"; continue;
-      case '\r': out += "\\r"; continue;
-      case '\t': out += "\\t"; continue;
-      default: break;
-    }
-
-    if (byte < 0x20 || byte >= 0x7F)
-    {
-      out += "\\x";
-      out += hex_digits[byte >> 4];
-      out += hex_digits[byte & 0x0F];
-      continue;
-    }
-
-    out += c;
-  }
-
-  if (truncated)
-  {
-    out += truncation_prefix;
-    out += std::to_string(value.size());
-    out += truncation_suffix;
-  }
-
-  return out;
-}
 
 }
 

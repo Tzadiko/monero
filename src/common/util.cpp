@@ -29,9 +29,7 @@
 // Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
 #include <unistd.h>
-#include <climits>
 #include <cstdio>
-#include <fcntl.h>
 #include <wchar.h>
 
 #ifdef __GLIBC__
@@ -69,8 +67,6 @@ using namespace epee;
 #ifdef WIN32
   #include <windows.h>
   #include <shlobj.h>
-  #include <io.h>
-  #include <sys/stat.h>
 #else
   #include <sys/file.h>
   #include <sys/stat.h>
@@ -432,241 +428,6 @@ namespace tools
     return std::error_code(code, std::system_category());
   }
 
-  size_t max_path_argument_length()
-  {
-#if defined(_WIN32)
-    // 32767 is the limit for a "\\?\"-prefixed Unicode path. MAX_PATH (260) is
-    // only the limit of the legacy narrow API, and bounding arguments by it here
-    // would refuse long but perfectly openable Windows paths. The purpose of the
-    // bound is to reject a value no filesystem can name, not to re-impose the
-    // legacy limit.
-    return 32767;
-#elif defined(PATH_MAX)
-    return PATH_MAX;
-#else
-    return 4096;
-#endif
-  }
-
-  std::string describe_path_argument(const std::string& path)
-  {
-    // Ordinary paths - including long temporary and container paths - are shown in
-    // full, because the point of the message is to let the reader recognise the
-    // path they typed. Beyond that, the head and the tail are kept and the middle
-    // is elided: the tail is where the filename lives, and it is the part a reader
-    // needs. The result is bounded, so a pathological argument (the kernel accepts
-    // 128 KiB in a single argument on Linux) cannot flood a console or a log file.
-    static constexpr size_t max_shown = 256;
-    static constexpr size_t head_shown = 160;
-    static constexpr size_t tail_shown = 64;
-    if (path.size() <= max_shown)
-      return "'" + path + "'";
-    return "'" + path.substr(0, head_shown) + "..." + path.substr(path.size() - tail_shown)
-      + "' (" + std::to_string(path.size()) + " bytes)";
-  }
-
-  namespace
-  {
-    //! Human readable name of a filesystem object kind, for path argument diagnostics.
-    const char *file_type_name(boost::filesystem::file_type type)
-    {
-      switch (type)
-      {
-        case boost::filesystem::regular_file: return "a regular file";
-        case boost::filesystem::directory_file: return "a directory";
-        case boost::filesystem::symlink_file: return "a symbolic link";
-        case boost::filesystem::block_file: return "a block device";
-        case boost::filesystem::character_file: return "a character device";
-        case boost::filesystem::fifo_file: return "a named pipe (FIFO)";
-        case boost::filesystem::socket_file: return "a socket";
-        case boost::filesystem::file_not_found: return "absent";
-        default: return "of an unknown kind";
-      }
-    }
-  }
-
-  bool validate_path_argument(const std::string& option_name, const std::string& path, path_argument_kind kind, std::string& error)
-  {
-    error.clear();
-    const std::string prefix = "Invalid --" + option_name + ": ";
-
-    if (path.empty())
-    {
-      error = prefix + "an empty path is not accepted";
-      return false;
-    }
-    if (path.size() > max_path_argument_length())
-    {
-      error = prefix + "the path is " + std::to_string(path.size()) + " bytes long, longer than the "
-        + std::to_string(max_path_argument_length()) + " bytes this system can name: " + describe_path_argument(path);
-      return false;
-    }
-    if (path.find('\0') != std::string::npos)
-    {
-      // The path would be silently truncated at the NUL by every filesystem call,
-      // so the file acted on would not be the file named.
-      error = prefix + "the path contains an embedded NUL byte: " + describe_path_argument(path);
-      return false;
-    }
-
-    const boost::filesystem::path fs_path(path);
-    boost::system::error_code ec;
-
-    if (kind == path_argument_kind::new_file)
-    {
-      // symlink_status(), not status(): the file must not exist under any guise,
-      // including as a symbolic link (a dangling one included), because the point
-      // is that nothing already at this name can be replaced or written through.
-      const boost::filesystem::file_status link_status = boost::filesystem::symlink_status(fs_path, ec);
-      if (link_status.type() != boost::filesystem::file_not_found)
-      {
-        error = prefix + describe_path_argument(path) + " already exists ("
-          + file_type_name(link_status.type()) + "); refusing to overwrite it - remove it or choose another path";
-        return false;
-      }
-      const boost::filesystem::path parent = fs_path.parent_path();
-      if (!parent.empty())
-      {
-        const boost::filesystem::file_status parent_status = boost::filesystem::status(parent, ec);
-        if (parent_status.type() != boost::filesystem::directory_file)
-        {
-          error = prefix + "the directory of " + describe_path_argument(path) + " is "
-            + file_type_name(parent_status.type()) + ", so the file cannot be created there";
-          return false;
-        }
-      }
-      return true;
-    }
-
-    // status() follows symbolic links, so a link to a regular file is accepted as
-    // a regular file and a link to a FIFO is refused as a FIFO - the kind that
-    // matters is the kind of the object that would actually be opened.
-    const boost::filesystem::file_status file_status = boost::filesystem::status(fs_path, ec);
-    const boost::filesystem::file_type type = file_status.type();
-
-    if (type == boost::filesystem::status_error)
-    {
-      error = prefix + "cannot determine what " + describe_path_argument(path) + " is: " + ec.message();
-      return false;
-    }
-
-    switch (kind)
-    {
-      case path_argument_kind::existing_file:
-        if (type == boost::filesystem::file_not_found)
-        {
-          error = prefix + describe_path_argument(path) + " does not exist";
-          return false;
-        }
-        if (type != boost::filesystem::regular_file)
-        {
-          error = prefix + describe_path_argument(path) + " is " + file_type_name(type) + ", not a regular file";
-          return false;
-        }
-        return true;
-
-      case path_argument_kind::output_file:
-        if (type == boost::filesystem::file_not_found)
-          return true;
-        if (type != boost::filesystem::regular_file)
-        {
-          error = prefix + describe_path_argument(path) + " is " + file_type_name(type) + ", not a regular file";
-          return false;
-        }
-        return true;
-
-      case path_argument_kind::directory:
-        if (type == boost::filesystem::file_not_found)
-          return true;
-        if (type != boost::filesystem::directory_file)
-        {
-          error = prefix + describe_path_argument(path) + " is " + file_type_name(type) + ", not a directory";
-          return false;
-        }
-        return true;
-
-      case path_argument_kind::new_file:
-        // Handled above, before the following-symlink status() call.
-        return true;
-    }
-
-    error = prefix + "unsupported validation of " + describe_path_argument(path);
-    return false;
-  }
-
-  bool save_string_to_new_file(const std::string& filename, const std::string& data, std::string& error)
-  {
-    error.clear();
-    if (filename.empty())
-    {
-      error = "Refusing to write to an empty filename";
-      return false;
-    }
-
-    // One atomic create decides everything: O_EXCL makes an existing file an
-    // error instead of a truncation, and O_NOFOLLOW makes a symbolic link an
-    // error instead of a write into its target. Because both are properties of
-    // this single open(), no check-then-open race can defeat them.
-#if defined(_WIN32)
-    // Windows has no O_NOFOLLOW; _O_EXCL still refuses an existing name, which is
-    // what stops a planted reparse point from being replaced or written through.
-    const int fd = ::_open(filename.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
-#else
-    const int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
-#endif
-    if (fd < 0)
-    {
-      const int err = errno;
-      switch (err)
-      {
-        case EEXIST:
-          error = "Refusing to overwrite existing file " + describe_path_argument(filename);
-          break;
-#if !defined(_WIN32)
-        case ELOOP:
-          error = "Refusing to write through the symbolic link " + describe_path_argument(filename);
-          break;
-#endif
-        default:
-          error = "Failed to create file " + describe_path_argument(filename) + ": " + std::string(strerror(err));
-          break;
-      }
-      return false;
-    }
-
-#if defined(_WIN32)
-    std::FILE *raw_handle = ::_fdopen(fd, "wb");
-#else
-    std::FILE *raw_handle = ::fdopen(fd, "wb");
-#endif
-    if (!raw_handle)
-    {
-      const int err = errno;
-#if defined(_WIN32)
-      ::_close(fd);
-#else
-      ::close(fd);
-#endif
-      error = "Failed to open file " + describe_path_argument(filename) + " for writing: " + std::string(strerror(err));
-      return false;
-    }
-
-    std::unique_ptr<std::FILE, close_file> handle{raw_handle};
-    if (!data.empty() && std::fwrite(data.data(), 1, data.size(), handle.get()) != data.size())
-    {
-      error = "Failed to write " + std::to_string(data.size()) + " bytes to " + describe_path_argument(filename);
-      return false;
-    }
-    // Close explicitly rather than through the unique_ptr, because a buffered
-    // write can only fail at flush time and that failure must be reported.
-    if (std::fclose(handle.release()) != 0)
-    {
-      error = "Failed to close file " + describe_path_argument(filename) + ": " + std::string(strerror(errno));
-      return false;
-    }
-    return true;
-  }
-
   static bool unbound_built_with_threads()
   {
     ub_ctx *ctx = ub_ctx_create();
@@ -799,29 +560,6 @@ namespace tools
 #endif
   }
 
-  /*!
-   * \brief Reports whether the filesystem path given is backed by a rotational disk.
-   *
-   * The probe takes a filesystem path, not a device node: it stats the path and
-   * reads the `rotational` queue attribute of the block device the path lives
-   * on, falling back to the parent device when the path sits on a partition.
-   * An empty optional means "could not tell": the path could not be stat'ed,
-   * the device exposes no rotational attribute (which is the normal case for
-   * pseudo-filesystems, overlay mounts and many virtualised block devices), or
-   * the attribute could not be read. Each of those outcomes is logged at debug
-   * level, because the difference between them is what a caller (or a
-   * developer configuring `MONERO_TEST_DEVICE_HDD` / `MONERO_TEST_DEVICE_SSD`
-   * for the `is_hdd` unit tests, documented in
-   * docs/COMPILING_DEBUGGING_TESTING.md) needs in order to act on the result.
-   * Those messages name the filesystem path the caller passed in and the outcome
-   * reached, and deliberately not the `/sys/dev/block/<major>:<minor>` identity of
-   * the device behind it: the sysfs location is an implementation detail of this
-   * probe, while the device number identifies the operator's storage layout, and
-   * a diagnostic is not a place to disclose it.
-   *
-   * \return true for a rotational disk, false for a non-rotational one, and an
-   *         empty optional when the kind of device could not be determined.
-   */
   boost::optional<bool> is_hdd(const char *file_path)
   {
 #ifdef __GLIBC__
@@ -835,7 +573,6 @@ namespace tools
     }
     else
     {
-      MDEBUG("is_hdd: cannot stat " << file_path << ": " << strerror(errno) << " - device kind unknown");
       return boost::none;
     }
     std::string attr_path = prefix + "/queue/rotational";
@@ -846,7 +583,6 @@ namespace tools
       f.open(attr_path, std::ios_base::in);
       if(not f.is_open())
       {
-          MDEBUG("is_hdd: neither the block device backing " << file_path << " nor its parent device exposes a rotational attribute - device kind unknown");
           return boost::none;
       }
     }
@@ -856,7 +592,6 @@ namespace tools
     {
       return (val == 1);
     }
-    MDEBUG("is_hdd: cannot read the rotational attribute of the block device backing " << file_path << " - device kind unknown");
     return boost::none;
 #else
     return boost::none;

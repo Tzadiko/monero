@@ -22,12 +22,12 @@ jobs:
   cache-sources:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: restore depends sources cache
         id: cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@v5
         with:
           path: contrib/depends/sources
           key: sources-${{ hashFiles('contrib/depends/packages/*') }}
@@ -35,7 +35,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: make -C contrib/depends download
       - name: save depends sources cache
-        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/save@v5
         if: github.event_name != 'pull_request' && steps.cache.outputs.cache-hit != 'true'
         with:
           path: contrib/depends/sources
@@ -59,7 +59,7 @@ jobs:
 
     name: ${{ matrix.toolchain.target }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           submodules: recursive
@@ -69,7 +69,7 @@ jobs:
           sudo mkdir /empty
           sudo rsync -a --delete /empty/ /usr/local
       - name: depends sources cache
-        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache/restore@v5
         with:
           path: contrib/depends/sources
           key: sources-${{ hashFiles('contrib/depends/packages/*') }}
@@ -107,7 +107,7 @@ jobs:
           /usr/local/bin/guix --version
       - name: build
         run: ADDITIONAL_GUIX_TIMEMACHINE_FLAGS="--disable-authentication" SUBSTITUTE_URLS='https://bordeaux.guix.gnu.org' GUIX_REPO='https://github.com/monero-project/guix.git' HOSTS="${{ matrix.toolchain.target }}" ./contrib/guix/guix-build
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.toolchain.target }}
           path: |
@@ -118,7 +118,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [build-guix]
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: print hashes
@@ -126,7 +126,7 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           find **/output/ -type f -print0 | env LC_ALL=C sort -z | xargs -r0 sha256sum >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@v7
         with:
           name: "logs"
           path: '**/logs/**'

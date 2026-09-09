@@ -105,7 +105,6 @@ int main(int argc, char* argv[])
   po::options_description desc_cmd_sett("Command line options and settings options");
 
   command_line::add_arg(desc_cmd_only, command_line::arg_help);
-  command_line::add_arg(desc_cmd_only, command_line::arg_version);
 
   po::options_description desc_options("Allowed options");
   desc_options.add(desc_cmd_only).add(desc_cmd_sett);
@@ -124,13 +123,7 @@ int main(int argc, char* argv[])
   {
     std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL << ENDL;
     std::cout << desc_options << std::endl;
-    return 0;
-  }
-
-  if (command_line::get_arg(vm, command_line::arg_version))
-  {
-    std::cout << "Monero '" << MONERO_RELEASE_NAME << "' (v" << MONERO_VERSION_FULL << ")" << ENDL;
-    return 0;
+    return 1;
   }
 
   mlog_configure("", true);

@@ -37,22 +37,11 @@
 
 #include <time.h>
 #include <atomic>
-#include <fstream>
-#include <iostream>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
 #include "string_tools.h"
 #include "time_helper.h"
 #include "misc_log_ex.h"
-
-#ifndef _WIN32
-#include <errno.h>
-#include <fcntl.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
 #define MONERO_DEFAULT_LOG_CATEGORY "logging"
@@ -156,146 +145,11 @@ bool EnableVTMode()
 }
 #endif
 
-/*!
- * \brief Validates the configured log file and creates it safely, or refuses the path.
- *
- * easylogging++ opens the configured file with a plain std::fstream (out|app) in
- * File::newFileStream(), and re-opens it with out|trunc after a rotation in
- * TypedConfigurations::unsafeValidateFileRolling(). Both of those follow a symbolic link, so
- * a log path that has been replaced by a link makes the process append log data to whatever
- * the link resolves to, outside the intended directory (CWE-59), and both create the file
- * with 0666 & ~umask - world readable at the usual umask, for a file that holds request
- * headers, peer addresses and, at verbose levels, whole RPC payloads. easylogging++ is
- * vendored and not modifiable here, so the path is checked and the file is created with the
- * mode we want before easylogging++ ever opens it.
- *
- * The rules are: the final component must not be a symbolic link; an existing path must be a
- * regular file (not a directory, FIFO, device or socket); missing parent directories are
- * created, because the daemon's default log path lives inside the data directory and that
- * directory is only created after logging has been configured; and the file, when we are the
- * one creating it, is created 0600. O_NOFOLLOW closes the window between the check and the
- * open, and O_NONBLOCK makes a FIFO left in place of the log file fail with ENXIO instead of
- * blocking the process for ever waiting for a reader. An existing file keeps its own mode -
- * only its creation belongs to us.
- *
- * \param filename Log file path as configured. Must not be empty.
- * \param error    Receives a human readable reason when the path is refused.
- * \return True when \p filename is safe to log to.
- */
-static bool mlog_prepare_log_file(const std::string &filename, std::string &error)
-{
-  boost::system::error_code ec;
-
-  // Never the throwing overload: this runs before the log system is usable, and the caller
-  // has to be able to report the problem rather than unwind through it. symlink_status()
-  // does not follow the final component, which is exactly the component under test.
-  const boost::filesystem::file_status status = boost::filesystem::symlink_status(filename, ec);
-  if (status.type() == boost::filesystem::file_not_found)
-  {
-    // A log file that does not exist yet is the normal case, and is created below. Boost
-    // reports it as file_not_found *and* sets ec, so the error code is only interesting here
-    // when it says something other than "does not exist": a parent component that is not a
-    // directory, or one that cannot be searched, arrives as file_not_found too.
-    if (ec && ec != boost::system::errc::no_such_file_or_directory)
-    {
-      error = "it cannot be examined: " + ec.message();
-      return false;
-    }
-  }
-  else if (ec)
-  {
-    error = "it cannot be examined: " + ec.message();
-    return false;
-  }
-  else if (status.type() == boost::filesystem::symlink_file)
-  {
-    error = "it is a symbolic link";
-    return false;
-  }
-  else if (status.type() != boost::filesystem::regular_file)
-  {
-    error = "it is not a regular file";
-    return false;
-  }
-
-  // easylogging++ creates the path itself in TypedConfigurations::insertFile(), so this has
-  // to keep happening here or a first run with a default log path inside a data directory
-  // that does not exist yet would lose its log.
-  const boost::filesystem::path parent = boost::filesystem::path(filename).parent_path();
-  if (!parent.empty())
-  {
-    boost::filesystem::create_directories(parent, ec);
-    if (ec)
-    {
-      error = "its directory " + parent.string() + " cannot be created: " + ec.message();
-      return false;
-    }
-  }
-
-#ifndef _WIN32
-  const int fd = open(filename.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, S_IRUSR | S_IWUSR);
-  if (fd < 0)
-  {
-    const int open_errno = errno;
-    // ELOOP is what O_NOFOLLOW reports for a symlinked final component: name it, since the
-    // generic string ("Too many levels of symbolic links") reads like a loop instead.
-    error = open_errno == ELOOP ? std::string("it is a symbolic link") :
-      std::string("it cannot be opened for appending: ") + strerror(open_errno);
-    return false;
-  }
-  struct stat st = {};
-  const int fstat_ret = fstat(fd, &st);
-  const int fstat_errno = errno;
-  close(fd);
-  if (fstat_ret < 0)
-  {
-    error = std::string("it cannot be examined: ") + strerror(fstat_errno);
-    return false;
-  }
-  if (!S_ISREG(st.st_mode))
-  {
-    error = "it is not a regular file";
-    return false;
-  }
-#else
-  // Windows has no O_NOFOLLOW; the symlink_status() check above is the whole of the link
-  // refusal there. Creating the file here still keeps the "must be openable for appending"
-  // guarantee that the rest of this function's contract rests on.
-  std::ofstream file(filename.c_str(), std::ios_base::out | std::ios_base::app | std::ios_base::binary);
-  if (!file.is_open())
-  {
-    error = "it cannot be opened for appending";
-    return false;
-  }
-  file.close();
-#endif
-
-  return true;
-}
-
 void mlog_configure(const std::string &filename_base, bool console, const std::size_t max_log_file_size, const std::size_t max_log_files)
 {
-  // A rejected path must not reach easylogging++ at all: TypedConfigurations::insertFile()
-  // opens whatever Filename holds regardless of ToFile, so the file name is cleared as well
-  // as file logging being turned off. An empty filename_base is a caller asking for
-  // console-only logging and is passed through untouched.
-  std::string filename = filename_base;
-  bool to_file = true;
-  if (!filename.empty())
-  {
-    std::string error;
-    if (!mlog_prepare_log_file(filename, error))
-    {
-      // The log system is not configured yet, so this cannot be reported through it.
-      std::cerr << "Cannot log to " << filename << ": " << error << ". File logging is disabled." << std::endl;
-      filename.clear();
-      to_file = false;
-    }
-  }
-
   el::Configurations c;
-  c.setGlobally(el::ConfigurationType::Filename, filename);
-  c.setGlobally(el::ConfigurationType::ToFile, to_file ? "true" : "false");
+  c.setGlobally(el::ConfigurationType::Filename, filename_base);
+  c.setGlobally(el::ConfigurationType::ToFile, "true");
   const char *log_format = getenv("MONERO_LOG_FORMAT");
   if (!log_format)
     log_format = MLOG_BASE_FORMAT;
@@ -369,19 +223,6 @@ void mlog_configure(const std::string &filename_base, bool console, const std::s
         }
       }
     }
-#ifndef _WIN32
-    // The rename above left the log path free and easylogging++ is about to re-open it with
-    // out|trunc, which would create it 0666 & ~umask again - the mode mlog_prepare_log_file()
-    // was careful to avoid. Re-create it here with 0600 instead, exclusively, so that nothing
-    // can slip a symbolic link in between the rename and the re-open. This deliberately comes
-    // after the pruning above, so that the placeholder cannot be picked up by the rotated-file
-    // scan and change which files that removes. On failure, leave the path exactly as it was
-    // before this change and let easylogging++ create it: the callback cannot log, and losing
-    // the log is worse than a loose mode.
-    const int rolled_fd = open(name, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW | O_CLOEXEC, S_IRUSR | S_IWUSR);
-    if (rolled_fd >= 0)
-      close(rolled_fd);
-#endif
   });
   mlog_set_common_prefix();
   const char *monero_log = getenv("MONERO_LOGS");
