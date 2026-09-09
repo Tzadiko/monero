@@ -8,19 +8,42 @@ cryptonote::core_rpc_server::connection_context ctx;
 epee::json_rpc::error error_resp;
 
 // Retrieve fuzz targets base on SAFE settings
+//
+// INVARIANT: the keys of the returned map are contiguous from 0, i.e. exactly [0, size() - 1],
+// so that fuzz_rpc.cpp's ConsumeIntegralInRange<unsigned>(0, fuzz_targets.size() - 1) selector
+// always names a live target. That harness dispatches with std::map::operator[], which
+// default-constructs and inserts an EMPTY std::function for a key it does not find; invoking such
+// a target throws std::bad_function_call, which escapes the harness' catch clauses and aborts the
+// whole fuzzing run. The hand-written maps below are not gap-free (risky_fuzz_targets has no key
+// 59) and their highest key can sit outside the selector range (key 65 was unreachable), so the
+// keys of the returned map are generated here by a running counter instead of being copied from
+// the source maps: every selector then resolves to a real target by construction, every target is
+// reachable, and a later edit that leaves a gap in a source map cannot reintroduce the defect.
+//
+// The concatenation order must stay priority -> safe -> risky: fuzz_rpc.cpp pre-seeds the
+// selectors 0 .. priority_fuzz_targets.size() - 1 to force every priority target to run in each
+// non-safe iteration, which only addresses the priority targets while they occupy the first slots.
+// Iterating each source map in its own (ascending) key order keeps the selector-to-endpoint
+// mapping of the priority and safe blocks exactly as it was.
 std::map<int, std::function<void(cryptonote::core_rpc_server& rpc, FuzzedDataProvider&)>> get_fuzz_targets(bool safe) {
     std::map<int, std::function<void(cryptonote::core_rpc_server& rpc, FuzzedDataProvider&)>> results;
 
+    // Append a block of fuzz targets under freshly generated, contiguous keys
+    int next_key = 0;
+    const auto append_targets = [&results, &next_key](const std::map<int, std::function<void(cryptonote::core_rpc_server&, FuzzedDataProvider&)>>& targets) {
+        for (const auto& kv : targets) {
+            results.emplace(next_key++, kv.second);
+        }
+    };
+
     if (safe) {
         // Only return safe and stable fuzz targets after re-indexing
-        for (const auto& kv : safe_fuzz_targets) {
-            results[kv.first - 14] = kv.second;
-        }
+        append_targets(safe_fuzz_targets);
     } else {
         // Return the full list of fuzz targets
-        results.insert(priority_fuzz_targets.begin(), priority_fuzz_targets.end());
-        results.insert(safe_fuzz_targets.begin(), safe_fuzz_targets.end());
-        results.insert(risky_fuzz_targets.begin(), risky_fuzz_targets.end());
+        append_targets(priority_fuzz_targets);
+        append_targets(safe_fuzz_targets);
+        append_targets(risky_fuzz_targets);
     }
 
     return results;

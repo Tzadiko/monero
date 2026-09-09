@@ -113,16 +113,30 @@ namespace
    * ever reaching the socket layer.
    *
    * \param port Raw command line value.
-   * \return True when \p port is a decimal number in the inclusive range [1, 65535].
+   * \return True when \p port is a decimal number, zero padding allowed, in the inclusive
+   *         range [1, 65535].
    */
   bool is_valid_tcp_bind_port(const std::string &port)
   {
-    if (port.empty() || port.size() > 5) // 65535 is the longest acceptable spelling
+    // A leading run of zeros belongs to a valid decimal spelling: "028712" denotes 28712, and
+    // every layer below this one reads it that way, because epee's get_xtype_from_string()
+    // checks that the value is all digits and then hands it to boost::lexical_cast, which
+    // ignores the padding. The significant digits are therefore isolated before the length and
+    // range checks: this validation exists to stop an out of range value from reaching the
+    // socket layer, not to narrow the spellings an operator may already have in a config file.
+    const std::size_t first_significant_digit = port.find_first_not_of('0');
+    if (first_significant_digit == std::string::npos)
+      return false; // empty, or nothing but zeros: port 0 is never a usable listening port
+
+    // 65535 is the longest acceptable spelling once the padding is discounted; testing the
+    // length first also keeps the accumulation below from overflowing on a long value
+    if (port.size() - first_significant_digit > 5)
       return false;
 
     uint32_t value = 0;
-    for (const char c : port)
+    for (std::size_t i = first_significant_digit; i < port.size(); ++i)
     {
+      const char c = port[i];
       if (c < '0' || c > '9')
         return false;
       value = value * 10 + static_cast<uint32_t>(c - '0');
@@ -168,6 +182,12 @@ namespace cryptonote
       , const std::string& proxy
     )
   {
+    // Apply the restricted flag first, before any path that can leave init() early. It decides
+    // which methods this server answers, so it must never be left holding a value that does not
+    // belong to this initialisation - not even on a path where the caller aborts startup. This
+    // is also the order every release before the bind port guard below used.
+    m_restricted = restricted;
+
     // Reject an unusable bind port before anything is created: no socket, and in particular no
     // RPC TLS key pair, is worth generating for a server that cannot legally listen. Naming the
     // option the value came from keeps the diagnostic actionable for both the core and the
@@ -183,7 +203,6 @@ namespace cryptonote
       return false;
     }
 
-    m_restricted = restricted;
     m_net_server.set_threads_prefix("RPC");
     m_net_server.set_connection_filter(&m_p2p);
 

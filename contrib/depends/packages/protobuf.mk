@@ -1,4 +1,7 @@
 package=protobuf
+# The version, download path, file name and sha256 hash below are inherited from
+# packages/native_protobuf.mk, which is the single source of truth for the protobuf pin.
+# The SEC4-F18-protobuf-pin-age version-currency note lives there; do not duplicate it here.
 $(package)_version=$(native_$(package)_version)
 $(package)_version_protobuf_cpp=$(native_$(package)_version_protobuf_cpp)
 $(package)_download_path=$(native_$(package)_download_path)

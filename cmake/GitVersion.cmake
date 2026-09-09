@@ -32,6 +32,9 @@
 
 # Read the commit identity that `git archive` stamps into the top-level
 # version.cmake, which .gitattributes marks `export-subst` for that purpose.
+# Why this fallback exists, and why the stamp is treated as untrusted input, is
+# recorded in docs/COMPILING_DEBUGGING_TESTING.md, section "Build-system changes
+# beyond the dialect switch".
 #
 # Sets VERSIONTAG and VERSION_IS_RELEASE in the caller's scope, and leaves
 # VERSIONTAG empty when the tree carries no usable stamp. That is the normal case

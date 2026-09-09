@@ -64,7 +64,42 @@ namespace net
 {
 namespace zmq
 {
+    /*! Maximum size of a message (all parts combined) that the application will
+        accept. This is the *application* limit: it is enforced by `receive`,
+        which reads every part of the message and then fails with
+        `net::zmq::make_error_code(EMSGSIZE)` instead of returning an
+        over-large payload. Because the message is fully consumed, the socket
+        remains usable and the caller can answer the sender - see
+        `cryptonote::rpc::ZmqServer::serve`. */
     constexpr std::size_t max_message_size = 10 * 1024 * 1024; // 10 MiB
+
+    /*! Maximum size of a single frame that the *transport* will accept, for use
+        with the `ZMQ_MAXMSGSIZE` socket option.
+
+        libzmq enforces `ZMQ_MAXMSGSIZE` inside its own decoder, before the
+        frame is ever delivered to the application: the offending frame is
+        discarded and the peer is disconnected, so no error can be reported to
+        the sender for a frame libzmq drops. This value is therefore kept
+        strictly above `max_message_size`, so that a frame which exceeds only
+        the application limit is still delivered, refused by `receive` with
+        `EMSGSIZE`, and answered with a structured error rather than silently
+        dropped.
+
+        The margin is deliberately bounded (a small multiple of the application
+        limit rather than `ZMQ_MAXMSGSIZE`'s unlimited `-1`) so that libzmq
+        still refuses a frame whose buffering would itself be the attack, and
+        so the extra memory an unauthenticated peer can make the transport hold
+        stays within a constant factor of the size the application already
+        buffers. */
+    constexpr std::size_t max_frame_size = 2 * max_message_size; // 20 MiB
+
+    /* A transport limit equal to (or below) the application limit would make
+       the application check - and the error reply that depends on it -
+       unreachable, because libzmq would drop every frame that could trip it. */
+    static_assert(
+        max_message_size < max_frame_size,
+        "ZMQ_MAXMSGSIZE must exceed the application limit enforced by net::zmq::receive"
+    );
 
     //! \return Category for ZMQ errors.
     const std::error_category& error_category() noexcept;

@@ -19,6 +19,22 @@ env:
   # tests/functional_tests/CMakeLists.txt probes for before registering
   # functional_tests_rpc and check_missing_rpc_methods. The modules are installed
   # without recommends because python3-deepdiff otherwise pulls in ~250 packages.
+  #
+  # Advisory status of the two distribution python modules, as of 2026-09-08:
+  #   python3-requests  ubuntu:24.04 2.31.0+dfsg-1ubuntu1.1, debian:13 2.32.3+dfsg-5+deb13u1.
+  #     CVE-2024-47081 and CVE-2024-35195 are fixed on both. CVE-2026-25645 (CVSS 4.4) is
+  #     unfixed on both (trixie "vulnerable, no DSA"; noble needs-triage). Exposure: NO.
+  #   python3-deepdiff  ubuntu:24.04 6.7.1-1, debian:13 8.1.1-4+deb13u1.
+  #     CVE-2025-58367 and CVE-2026-33155 are backported in the trixie package; the noble
+  #     6.7.1-1 package carries neither (needs-triage). Exposure: NO.
+  # Exposure is NO for both because these jobs only configure and build: the tests that
+  # import the modules drive daemons they start themselves on 127.0.0.1 and never fetch an
+  # untrusted URL, and the only deepdiff use in the tree is DeepDiff() in
+  # tests/functional_tests/transfer.py — no Delta() and no pickle input, which both
+  # deepdiff advisories require. The entries below are therefore kept as they are: they are
+  # what makes functional_tests_rpc and check_missing_rpc_methods register at all, so
+  # removing or substituting them would drop `ctest -N` from 24 to 22 (AAP 0.5.1, 0.10.1).
+  # The job that actually runs those tests pins fixed versions with pip (see test-ubuntu).
   APT_INSTALL_LINUX: 'apt -y install build-essential cmake libboost-all-dev libunbound-dev graphviz doxygen libunwind-dev pkg-config libssl-dev libzmq3-dev libsodium-dev libreadline-dev libhidapi-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler ccache curl git && apt -y install --no-install-recommends python3 python3-requests python3-zmq python3-deepdiff'
   APT_SET_CONF: |
     tee -a /etc/apt/apt.conf.d/80-custom << EOF
@@ -32,6 +48,12 @@ env:
     cd build
     env GTEST_FILTER="-DNSResolver.*:AddressFromURL.*:select_outputs.*" ctest --output-on-failure -E "functional_tests_rpc|core_tests|cnv4-jit|hash-variant2-int-sqrt|wide_difficulty"
   USE_DEVICE_TREZOR_MANDATORY: ON
+  # Rust toolchain pin, reviewed 2026-09-08: 1.93 is past upstream's support window (EOL
+  # 2026-03-06; current stable is 1.98), but no advisory affects 1.93.1 — an NVD search for
+  # Rust 1.93.1 returns 0 records. The pin is held deliberately: "1.93 is the CI-tested
+  # toolchain" is fixed by AAP 0.5.1 and 0.4.1 C8 and is stated in the README's Rust row,
+  # and commit f7163dd27 already reverted an unauthorized rustup bump in CI. Refresh this
+  # toolchain and the depends.yml pin together with that README row, not on their own.
   INSTALL_RUST: |
     curl -O https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init
     echo "4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10 rustup-init" | sha256sum -c
@@ -44,11 +66,11 @@ jobs:
     name: 'macOS (brew)'
     runs-on: macOS-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: recursive
       - name: restore ccache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: ccache-restore
         with:
           path: /Users/runner/Library/Caches/ccache
@@ -69,7 +91,7 @@ jobs:
       - name: reduced tests
         run: ${{env.CTEST_EXCLUDE_SLOW}}
       - name: save ccache
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         if: github.event_name != 'pull_request' && steps.ccache-restore.outputs.cache-hit != 'true'
         with:
           path: /Users/runner/Library/Caches/ccache
@@ -82,17 +104,17 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: recursive
       - name: restore ccache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: ccache-restore
         with:
           path: C:\Users\runneradmin\AppData\Local\ccache
           key: ccache-${{ runner.os }}-build-${{ github.sha }}
           restore-keys: ccache-${{ runner.os }}-build-
-      - uses: msys2/setup-msys2@v2
+      - uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
         with:
           msystem: ucrt64
           update: true
@@ -108,7 +130,7 @@ jobs:
       - name: reduced tests
         run: ${{env.CTEST_EXCLUDE_SLOW}}
       - name: save ccache
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         if: github.event_name != 'pull_request' && steps.ccache-restore.outputs.cache-hit != 'true'
         with:
           path: C:\Users\runneradmin\AppData\Local\ccache
@@ -118,17 +140,20 @@ jobs:
     name: 'Arch Linux'
     runs-on: ubuntu-latest
     container:
+      # Deliberately an unpinned rolling tag, not a digest: this job exists to build against
+      # Arch's current release for continuous rolling-compiler coverage (AAP 0.6.6), which a
+      # digest would freeze.
       image: archlinux:latest
     steps:
       - name: install dependencies
         run: pacman -Syyu --noconfirm base-devel git rust cmake boost boost-libs openssl zeromq unbound libsodium readline expat gtest python3 python-requests python-pyzmq python-deepdiff doxygen graphviz hidapi libusb protobuf ccache
       - name: configure git
         run: git config --global --add safe.directory '*'
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: recursive
       - name: restore ccache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: ccache-restore
         with:
           path: ~/.cache/ccache
@@ -142,7 +167,7 @@ jobs:
           ${{ env.CCACHE_SETTINGS }}
           ${{ env.BUILD_DEFAULT }}
       - name: save ccache
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         if: github.event_name != 'pull_request' && steps.ccache-restore.outputs.cache-hit != 'true'
         with:
           path: ~/.cache/ccache
@@ -155,14 +180,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Oldest supported Debian version
+          # Oldest supported Debian version.
+          # Scanned 2026-09-08 (trivy, vuln scanner): 191 findings, 3 CRITICAL and 52 HIGH
+          # distribution CVEs, most with no fix available. Accepted: the image is a build
+          # container that is never shipped, so exposure is build-time only, and CI's own
+          # apt update pulls the fixed libssl. debian:13 is mandated as the oldest supported
+          # Debian container (AAP 0.4.1 C1 and 0.6.6) and is not replaced by ubuntu:24.04.
+          # The digest below pins that scan result; refresh it whenever the tag is refreshed.
           - name: Debian 13
             container: debian:13
+            digest: sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1
           # Oldest supported Ubuntu LTS version
           - name: Ubuntu 24.04
             container: ubuntu:24.04
+            digest: sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
     container:
-      image: ${{ matrix.container }}
+      # The tag stays in matrix.container because the ccache key below is keyed on it; the
+      # digest is a separate field so pinning the image cannot move a cache key.
+      image: ${{ matrix.container }}@${{ matrix.digest }}
       env:
         DEBIAN_FRONTEND: noninteractive
     steps:
@@ -176,11 +211,11 @@ jobs:
         run: ${{env.INSTALL_RUST}}
       - name: configure git
         run: git config --global --add safe.directory '*'
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: recursive
       - name: restore ccache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: ccache-restore
         with:
           path: ~/.cache/ccache
@@ -194,7 +229,7 @@ jobs:
           ${{env.CCACHE_SETTINGS}}
           ${{env.BUILD_DEFAULT}}
       - name: save ccache
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         if: github.event_name != 'pull_request' && steps.ccache-restore.outputs.cache-hit != 'true'
         with:
           path: ~/.cache/ccache
@@ -209,8 +244,10 @@ jobs:
           # Most popular Ubuntu LTS version
           - name: Ubuntu 24.04
             container: ubuntu:24.04
+            digest: sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
     container:
-      image: ${{ matrix.container }}
+      # As in build-linux: tag in matrix.container for the ccache key, digest alongside it.
+      image: ${{ matrix.container }}@${{ matrix.digest }}
       env:
         DEBIAN_FRONTEND: noninteractive
       # Setting up a loop device (losetup) requires additional capabilities.
@@ -228,14 +265,20 @@ jobs:
       - name: install pip
         run: apt install -y python3-pip
       - name: install Python dependencies
-        run: python3 -m pip install --break-system-packages requests psutil monotonic zmq deepdiff
+        # This is the only job that executes the Python functional tests, and pip installs
+        # over the distribution packages here, so the advisory floors are applied at this
+        # single site: requests >= 2.33.0 (CVE-2026-25645, unfixed in both container images)
+        # and deepdiff >= 8.6.2 (CVE-2025-58367 and CVE-2026-33155; upstream's guidance is to
+        # pin >= 8.6.2, and ubuntu:24.04 ships 6.7.1-1 with neither fix). The remaining three
+        # packages carry no advisory and stay unconstrained.
+        run: python3 -m pip install --break-system-packages 'requests>=2.33.0' psutil monotonic zmq 'deepdiff>=8.6.2'
       - name: configure git
         run: git config --global --add safe.directory '*'
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: recursive
       - name: restore ccache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         id: ccache-restore
         with:
           path: ~/.cache/ccache
@@ -265,7 +308,7 @@ jobs:
       - name: run core_tests
         run: ctest --test-dir build --output-on-failure -R core_tests
       - name: save ccache
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         if: github.event_name != 'pull_request' && steps.ccache-restore.outputs.cache-hit != 'true'
         with:
           path: ~/.cache/ccache
@@ -275,7 +318,7 @@ jobs:
     name: 'Docker'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           submodules: recursive
       - name: build image
@@ -285,7 +328,8 @@ jobs:
     name: "source archive"
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:22.04
+      # This job does not compile and stays on 22.04 (AAP 0.2.1); the digest pins that image.
+      image: ubuntu:22.04@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
       env:
         DEBIAN_FRONTEND: noninteractive
     steps:
@@ -297,7 +341,7 @@ jobs:
         run: apt install -y git python3-pip
       - name: configure git
         run: git config --global --add safe.directory '*'
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
           submodules: recursive
@@ -308,7 +352,7 @@ jobs:
           export OUTPUT="$VERSION.tar"
           echo "OUTPUT=$OUTPUT" >> $GITHUB_ENV
           git-archive-all --prefix "$VERSION/" --force-submodules "$OUTPUT"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.OUTPUT }}
           path: ${{ env.OUTPUT }}

@@ -178,6 +178,74 @@ every other pin, is covered by the depends gate rather than by a native build.
 Raising either declared floor is a separate maintainers' decision, not a
 consequence of the move to C++23.
 
+The remaining libraries in the `README.md` dependency table deserve the same
+distinction, and for most of them the honest answer is that the build declares
+no version at all — which is what `any` in that column means. What is worth
+recording is therefore the version the code itself requires, where it requires
+one, and the versions that have actually been through a build:
+
+- **libsodium — no declared floor.** `find_package(Sodium REQUIRED)` in the
+  top-level `CMakeLists.txt` passes no version, so nothing is enforced at
+  configure time, and the surface the tree uses is narrow and long-standing:
+  `crypto_verify_32`, the `crypto_shorthash_siphash24` key and output size
+  constants in `src/crypto/generic-ops.h`, and
+  `crypto_aead_chacha20poly1305_ietf_decrypt` in the Trezor protocol code.
+  1.0.18 is the version verified here and the version `contrib/depends` pins.
+  One property of that pin is worth knowing rather than acting on: the advisory
+  raised against 1.0.18 concerns `crypto_core_ed25519_is_valid_point`, and this
+  tree calls no `crypto_core_ed25519` or `crypto_scalarmult_ed25519` entry point
+  at all, so it is not reachable from here. Whether to move the pin is a
+  maintainers' decision about `contrib/depends`.
+- **libhidapi — no declared floor.** The API this tree calls — `hid_init`,
+  `hid_exit`, `hid_enumerate`, `hid_free_enumeration`, `hid_open_path`,
+  `hid_close`, `hid_read`, `hid_read_timeout`, `hid_write`, `hid_error` —
+  predates every release in packaged use, and no version is checked at configure
+  time. 0.14.0 is verified here; `contrib/depends` pins 0.15.0.
+- **libusb — 1.0.16, derived from the code rather than declared by the build.**
+  `src/device_trezor/trezor/transport.cpp:847` calls
+  `libusb_get_port_numbers`, which libusb added in 1.0.16, so that is a real
+  minimum even though nothing enforces it. The `libusb_set_option` call beside
+  it does not raise the floor: it is compiled only behind
+  `#if defined(LIBUSB_API_VERSION) && (LIBUSB_API_VERSION >= 0x01000106)`, with
+  a `libusb_set_debug` fallback for anything older. 1.0.29 is verified here;
+  `contrib/depends` pins 1.0.30.
+- **libprotobuf and protoc — a matched pair rather than a floor.** The Trezor
+  protobuf sources are not committed: `cmake/CheckTrezor.cmake` regenerates them
+  into `src/device_trezor/trezor/messages` on every configure, so the generated
+  code always carries the version guard of the local `protoc` and has to be
+  compiled against the matching runtime. What the build needs is therefore that
+  the two agree, not that either reaches some absolute version — which is why
+  `find_package(Protobuf)` is asked for no version and the table says "matching"
+  instead. 3.21.12, with `protoc` reporting `libprotoc 3.21.12`, is the pair
+  verified here and the release `contrib/depends` pins. Two conditions bound the
+  usable range at the other end, both visible in the tree: from protobuf 22 the
+  library requires Abseil, which `CheckTrezor.cmake` accommodates by defining
+  `PROTOBUF_HAS_ABSEIL` when it detects that version or newer; and
+  `src/device_trezor/trezor/protocol.cpp` still uses the legacy
+  `google::protobuf::uint32` and `google::protobuf::uint64` aliases, so a
+  protobuf that no longer provides them would need those casts changed first. No
+  release beyond 3.21.12 has been exercised.
+- **libudev — no declared floor, and needed by one configuration only.** It is
+  not a dependency of an ordinary build; which build needs it, and why the
+  configure step now fails rather than warns when it is missing, is described
+  under "Build-system changes beyond the dialect switch" below.
+- **libunwind — no declared floor, and narrower in scope than the table
+  suggests.** It backs the exception stack-trace hook, and the root build
+  reaches for it only in the one case none of its earlier branches claim: a
+  non-Release build, on neither Apple nor NetBSD, not a non-Linux
+  `contrib/depends` build, not ARM, and compiled by something other than
+  non-MinGW GCC — in practice a Clang debug build on Linux. A GCC build gets
+  the same hook from easylogging++ instead and links no libunwind at all, and
+  every Linux CI job builds `Release`, where the hook is off, so no CI job
+  exercises this path; the configure line to look for is either "Stack trace on
+  exception enabled (using libunwind)" or "disabled". On macOS the build
+  disables it outright, which is why `contrib/brew/Brewfile` installs no
+  libunwind package: `libunwind-headers` would be dead weight there, and
+  Homebrew has deprecated that formula as unmaintained. The `Brewfile` records
+  the same reasoning where the package would otherwise sit, so that the
+  README's "install all dependencies at once" claim for macOS stays true
+  without it.
+
 ### Rust
 
 Rust and `cargo` are mandatory on `master` — `src/fcmp_pp/fcmp_pp_rust` is
@@ -231,6 +299,117 @@ first-party suppression — or moving the recipe to a protobuf release that fixe
 the enum arithmetic upstream. Both change the inputs of a reproducible build,
 which makes them maintainers' decisions rather than part of a language-standard
 migration, so neither is done here.
+
+## Build-system changes beyond the dialect switch
+
+The dialect is spelled out in three places — `CMAKE_CXX_STANDARD` in the
+top-level `CMakeLists.txt`, `CXX_STANDARD` in `contrib/depends/Makefile`, and the
+Darwin branch of `contrib/depends/toolchain.cmake.in` — and every other build
+file in the tree inherits it from one of those. Raising the CMake floor to 3.25
+and enforcing the compiler floors above nevertheless reached a few build files
+that carry no dialect setting at all, because a prerequisite that used to be
+diagnosed late, or not at all, now has to be diagnosed by name at configure
+time. Those changes are recorded here, with the reason for each, so that the
+build system can be reviewed without having to infer why a find module or a
+version stamp moved in a language-standard migration. None of them changes what
+is built or how it behaves; each changes when and how a missing prerequisite is
+reported, or what a binary reports about its own provenance.
+
+### Commit identity in builds made from a source archive
+
+`cmake/GitVersion.cmake` derives what a binary reports as its version from Git:
+`git rev-parse --short=9 HEAD` for the commit, and `git tag -l --points-at HEAD`
+for whether that commit is a tagged release. Neither answers in a source
+archive, which carries no Git working tree, and yet the module's own diagnostic
+already told the reader to build "either from a Git working tree or from a
+source archive" — advice it could not honour, because the archive case fell
+through to `VERSIONTAG` becoming `unknown`.
+
+The top-level `version.cmake` closes that gap. `.gitattributes` already declared
+`version.cmake export-subst` before this change, for a file the tree did not
+contain, so nothing was ever stamped; the file now exists, and the pattern is
+anchored as `/version.cmake` so that it cannot also match a file of that name
+further down the tree. That attribute is what makes the mechanism work:
+`git archive` — and every archiver that asks Git for file content, including the
+"Source code" tarballs GitHub generates for a tag — substitutes the archived
+commit's hash and its ref names into the two placeholders the file holds.
+`GitVersion.cmake` consults the stamp only after Git has failed, reports `You
+are building from a source archive of commit <hash>`, and treats a stamp whose
+ref names carry `tag: ` as the tagged release that the Git path would have
+reported.
+
+The stamp is parsed as untrusted input, because that is what an archive is.
+`version.cmake` is valid CMake, but `GitVersion.cmake` never includes it: it
+reads the file as text, accepts the hash only as a complete 40-character
+hexadecimal string — which an unsubstituted `$Format:` placeholder cannot be —
+and uses the ref names for nothing but a test for the substring `tag: `. Nothing
+read out of an archive reaches a command line, a filesystem path, or a CMake
+`include()`.
+
+The older tarball test in `cmake/Version.cmake` — `if ("$Format:$" STREQUAL "")`
+— is a different mechanism and cannot fire: that file is not marked
+`export-subst`, so its placeholder reaches CMake verbatim out of any archive,
+and the branch it guards is dead. It is left as it is; the stamp above is what
+the archive path now runs on.
+
+Two consequences of archiving are worth knowing. Git stores no empty
+directories, so a directory whose only tracked file is caught by
+`.git* export-ignore` disappears from an archive altogether;
+`src/device_trezor/trezor/messages/`, the directory the Trezor protobuf sources
+are generated into, therefore keeps a placeholder file whose name matches no
+`export-ignore` pattern. And an archiver that copies the working tree instead of
+asking Git for its content substitutes nothing: `git-archive-all`, which the
+`source archive` CI job uses to produce its `--force-submodules` tarball, is one
+of those, so a binary built from that tarball still reports an unknown tag.
+
+### libudev, and a statically linked libusb or hidapi
+
+`cmake/FindLibUSB.cmake` and `cmake/FindHIDAPI.cmake` both add libudev to their
+library list when a static Linux build is configured, and both used to fall back
+to `message(WARNING "libudev library not found, binaries may fail to link.")`
+when it was absent. On a host whose libusb carries the udev backend that warning
+understates the situation: the build then ends, after every object has been
+compiled, at the first link step, with `undefined reference to
+udev_device_get_action@@LIBUDEV_183`.
+
+Both modules now separate that case from the ones where the warning is right.
+They ask `pkg-config` what `libusb-1.0` declares as its private static
+dependencies — `Libs.private`, which is what `pkg_check_modules` reports in its
+`_STATIC_LIBRARIES` variable — and when `udev` is named there and the platform
+is not FreeBSD, the archive about to be linked contains that backend, so the
+missing library is a hard error raised at configure time. The message names the
+package to install (`libudev-dev` on Debian and Ubuntu, `systemd-devel` on
+Fedora, `eudev-libudev-devel` on Void, `systemd-libs` on Arch) and the escape
+hatch `-DLIBUDEV_LIBRARY=<path to libudev>` for a libusb genuinely built without
+the udev backend. Every other case keeps the historical warning: FreeBSD, which
+has no udev; a host without `pkg-config`; and a libusb that does not name udev.
+`FindHIDAPI.cmake` runs the query against `libusb-1.0` rather than against
+hidapi, because hidapi's own `.pc` file declares no private dependencies and it
+is the libusb this module appends alongside it that brings the backend in.
+
+So libudev is a mandatory build dependency of exactly one configuration: a
+static Linux build that links the system libusb or hidapi. It is not needed for
+a shared build, nor for `contrib/depends`, whose hidapi is built without the
+udev backend — which is why the check is skipped when `DEPENDS` is set — nor on
+Android, which both modules exclude from the error, nor on FreeBSD.
+The `libudev` row of the dependency table in `README.md` states the same scope.
+
+### The cargo prerequisite
+
+`src/fcmp_pp/fcmp_pp_rust` is built unconditionally and its static library is
+linked into every executable, so a tree without a Rust toolchain builds nothing
+at all. The top-level `CMakeLists.txt` therefore resolves `cargo` and `rustc`
+before anything else needs them, runs `--version` on each to reject a toolchain
+that is present but not usable, reports both in the configure log, and on
+failure says what Rust is needed for and how to install it. Both are cache
+variables, so a toolchain outside `PATH` can be pointed at with
+`-DCARGO_EXECUTABLE=` and `-DRUSTC_EXECUTABLE=`.
+`src/fcmp_pp/fcmp_pp_rust/CMakeLists.txt` repeats the `cargo` lookup for the
+case where that directory is configured without the top-level guard having run,
+and invokes the resolved path rather than the bare name, so that a missing
+toolchain is still named at configure time instead of failing later as an
+unnamed executable inside a custom command. "Rust" above records which toolchain
+CI tests with.
 
 ## Use cases
 
@@ -455,6 +634,13 @@ easy to leave out of a local install and then wonder what is missing:
   and installs only `psutil` and `monotonic`, neither of which this tree
   imports — the test harness uses `time.monotonic()` from the standard
   library.
+  These three modules are test tooling and nothing else: they are
+  imported by `utils/python-rpc/framework/rpc.py` and `framework/zmq.py` and by
+  the scenarios under `tests/functional_tests/`, and by no daemon, wallet or
+  library this repository builds, so their versions bear on the test run and on
+  nothing that ships. The probe requires no version, only that the imports
+  succeed; the combination the suite has been run with here is Python 3.13.7
+  with requests 2.33.1, pyzmq 27.2.0 and deepdiff 9.1.0.
 
 With both groups present, a configure of the CI configuration emits no
 `CMake Warning`, `ctest --test-dir build -N` lists 24 tests including those

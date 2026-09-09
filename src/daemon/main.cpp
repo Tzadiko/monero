@@ -130,6 +130,46 @@ bool isFat32(const wchar_t* root_path)
 }
 #endif
 
+/*!
+ * \brief Checks a resolved --log-file path, returning why it is unusable.
+ *
+ * The logging layer refuses to write through a symbolic link or to anything that is not a
+ * regular file, and falls back to console-only logging when it has to (mlog_configure() in
+ * contrib/epee/src/mlog.cpp): appending log data through a link writes it outside the
+ * directory the operator chose, and a FIFO or device in place of the log file is never what
+ * was meant. Silently dropping file logging is the right default for a library, but a daemon
+ * that was explicitly told where to log should say so and stop, so the same rules are applied
+ * here, where the option name can still be named in the message. The path is only inspected,
+ * never created: creating it is mlog_configure()'s job, and it does that with the mode and
+ * the O_NOFOLLOW the check relies on.
+ *
+ * \param log_file_path The fully resolved log file path, as it will be passed to mlog_configure().
+ * \return An empty string when the path is usable, otherwise the reason it is not.
+ */
+static std::string log_file_rejection_reason(const bf::path &log_file_path)
+{
+  boost::system::error_code ec;
+  // symlink_status() does not follow the final component - the component under test.
+  const bf::file_status status = bf::symlink_status(log_file_path, ec);
+  if (status.type() == bf::file_not_found)
+  {
+    // The usual first run: the file is created by mlog_configure(), along with any missing
+    // parent directory. Boost reports a missing path as file_not_found *and* sets ec, so only
+    // an error other than "does not exist" matters here - a parent component that is not a
+    // directory, or one that cannot be searched, also comes back as file_not_found.
+    if (ec && ec != boost::system::errc::no_such_file_or_directory)
+      return "it cannot be examined: " + ec.message();
+    return std::string();
+  }
+  if (ec)
+    return "it cannot be examined: " + ec.message();
+  if (status.type() == bf::symlink_file)
+    return "it is a symbolic link; specify the real file path";
+  if (status.type() != bf::regular_file)
+    return "it is not a regular file; specify a plain file path";
+  return std::string();
+}
+
 int main(int argc, char const * argv[])
 {
   try {
@@ -218,6 +258,20 @@ int main(int argc, char const * argv[])
     boost::system::error_code ec;
     if (bf::exists(config_path, ec))
     {
+      // The config file is opened and parsed immediately below. A path that
+      // exists but is not a regular file cannot be one: a directory or a socket
+      // fails the parse with an obscure message, and a named pipe with no writer
+      // blocks the open forever, so the daemon never starts and never says why -
+      // not even under a timeout, which sees only a killed process. Refuse it
+      // here, where the option is still the subject of the message.
+      std::string config_error;
+      if (!tools::validate_path_argument(daemon_args::arg_config_file.name, config, tools::path_argument_kind::existing_file, config_error))
+      {
+        // log system isn't initialized yet
+        std::cerr << config_error << ENDL;
+        return 1;
+      }
+
       try
       {
         po::store(po::parse_config_file<char>(config_path.string<std::string>().c_str(), core_settings), vm);
@@ -244,7 +298,10 @@ int main(int argc, char const * argv[])
     }
     else if (!command_line::is_arg_defaulted(vm, daemon_args::arg_config_file))
     {
-      std::cerr << "Can't find config file " << config << std::endl;
+      // Echo the value through describe_path_argument(): a path argument is
+      // whatever the caller typed, and the kernel accepts 128 KiB of it, so an
+      // unbounded echo turns a wrong option into a screenful of output.
+      std::cerr << "Can't find config file " << tools::describe_path_argument(config) << std::endl;
       return 1;
     }
 
@@ -274,6 +331,24 @@ int main(int argc, char const * argv[])
       return 1;
     }
 
+    // A supplied data directory must be a directory, and must be short enough for
+    // the operating system to name: everything the daemon creates - the database,
+    // the log file, the RPC TLS key pair - is created inside it, so a value that
+    // names a file, a named pipe or a device, or that is longer than any path can
+    // be, is refused here rather than surfacing later as a series of failures to
+    // create things. A path that does not exist yet is accepted, because the
+    // daemon creates its data directory.
+    if (!command_line::is_arg_defaulted(vm, cryptonote::arg_data_dir))
+    {
+      std::string data_dir_error;
+      if (!tools::validate_path_argument(cryptonote::arg_data_dir.name, command_line::get_arg(vm, cryptonote::arg_data_dir), tools::path_argument_kind::directory, data_dir_error))
+      {
+        // log system isn't initialized yet
+        std::cerr << data_dir_error << ENDL;
+        return 1;
+      }
+    }
+
     // data_dir
     //   default: e.g. ~/.bitmonero/ or ~/.bitmonero/testnet
     //   if data-dir argument given:
@@ -295,6 +370,40 @@ int main(int argc, char const * argv[])
     //bf::path relative_path_base = daemonizer::get_relative_path_base(vm);
     bf::path relative_path_base = data_dir;
 
+    // Validate a supplied --log-file before the logging system is configured from
+    // it. mlog_configure() below cannot report a bad path: it has no failure
+    // channel, so an unusable value simply produces a daemon with no log file
+    // (a 131,000 byte path was accepted this way, silently), and a named pipe
+    // with no writer makes the open block forever, before any logging exists to
+    // say so. The path is resolved the way the block below resolves it, so that
+    // the value checked is the file that would actually be opened.
+    if (!command_line::is_arg_defaulted(vm, daemon_args::arg_log_file))
+    {
+      const std::string log_file_arg = command_line::get_arg(vm, daemon_args::arg_log_file);
+      std::string log_file_error;
+      // The value as typed is checked first, because its length and its contents
+      // are properties of the argument itself.
+      if (!tools::validate_path_argument(daemon_args::arg_log_file.name, log_file_arg, tools::path_argument_kind::output_file, log_file_error))
+      {
+        // log system isn't initialized yet
+        std::cerr << log_file_error << ENDL;
+        return 1;
+      }
+      bf::path resolved_log_file{log_file_arg};
+      if (!resolved_log_file.has_parent_path())
+      {
+        // A bare filename is opened inside the data directory, so that is the
+        // path whose kind has to be checked.
+        resolved_log_file = bf::absolute(resolved_log_file, relative_path_base);
+        if (!tools::validate_path_argument(daemon_args::arg_log_file.name, resolved_log_file.string(), tools::path_argument_kind::output_file, log_file_error))
+        {
+          // log system isn't initialized yet
+          std::cerr << log_file_error << ENDL;
+          return 1;
+        }
+      }
+    }
+
     po::notify(vm);
 
     // log_file_path
@@ -307,6 +416,22 @@ int main(int argc, char const * argv[])
       log_file_path = command_line::get_arg(vm, daemon_args::arg_log_file);
     if (!log_file_path.has_parent_path())
       log_file_path = bf::absolute(log_file_path, relative_path_base);
+
+    // Reject an unusable log file here, on the fully resolved path and before mlog_configure()
+    // is given it. mlog_configure() enforces the same rules at the epee layer - it will not
+    // write through a symbolic link (which would append log data outside the intended
+    // directory) nor to a FIFO or device - but it can only continue with file logging
+    // disabled, which is not an acceptable outcome for a daemon that was told where to log:
+    // the operator would get a running daemon and no log. Stopping here, with the option
+    // named, is.
+    const std::string log_file_rejection = log_file_rejection_reason(log_file_path);
+    if (!log_file_rejection.empty())
+    {
+      // log system isn't initialized yet
+      std::cerr << "Invalid --" << daemon_args::arg_log_file.name << " " << log_file_path.string() << ": " << log_file_rejection << ENDL;
+      return 1;
+    }
+
     mlog_configure(log_file_path.string(), true, command_line::get_arg(vm, daemon_args::arg_max_log_file_size), command_line::get_arg(vm, daemon_args::arg_max_log_files));
 
     // Set log level

@@ -186,6 +186,136 @@ namespace
     }
   }
   //------------------------------------------------------------------------------------------------------------------------------
+  // Decodes the UTF-8 sequence that starts at 'pos' in 'text'. On success 'code_point' receives the
+  // decoded scalar value, 'pos' advances past the sequence and true is returned. On any malformed
+  // input the function returns false without touching either output.
+  //
+  // The wallet name arrives as raw bytes inside a JSON string and is used both as a filesystem name
+  // and as a name an operator reads, so it has to be decoded before it can be classified: without
+  // this decoder an overlong encoding (0xc0 0x80, 0xc1 0x9b, ...) would smuggle a NUL or an ESC past
+  // a byte-wise or code-point-wise class check, and a lone surrogate or a five-byte sequence would
+  // reach the filesystem as a name no tool can render. Malformed UTF-8 is therefore itself a refusal
+  // reason, not merely a decoding accident.
+  bool utf8_next_code_point(const std::string &text, std::size_t &pos, std::uint32_t &code_point)
+  {
+    const unsigned char lead = static_cast<unsigned char>(text[pos]);
+    std::size_t continuations;    // continuation bytes this lead byte promises
+    std::uint32_t value;          // code point bits the lead byte itself contributes
+    if (lead < 0x80)
+    {
+      continuations = 0;
+      value = lead;
+    }
+    else if (lead < 0xc2)
+    {
+      // 0x80-0xbf is a continuation byte with no lead byte before it; 0xc0 and 0xc1 can only ever
+      // begin a two-byte encoding of a code point that fits in one byte, i.e. an overlong form.
+      return false;
+    }
+    else if (lead < 0xe0)
+    {
+      continuations = 1;
+      value = lead & 0x1fu;
+    }
+    else if (lead < 0xf0)
+    {
+      continuations = 2;
+      value = lead & 0x0fu;
+    }
+    else if (lead < 0xf5)
+    {
+      continuations = 3;
+      value = lead & 0x07u;
+    }
+    else
+    {
+      // 0xf5-0xfd would encode a code point above U+10FFFF; 0xfe and 0xff are not UTF-8 at all.
+      return false;
+    }
+    if (text.size() - pos <= continuations)
+      return false;               // truncated sequence: the name ends inside it
+    for (std::size_t i = 1; i <= continuations; ++i)
+    {
+      const unsigned char continuation = static_cast<unsigned char>(text[pos + i]);
+      if ((continuation & 0xc0u) != 0x80u)
+        return false;             // a lead byte or an ASCII byte where a continuation was promised
+      value = (value << 6) | (continuation & 0x3fu);
+    }
+    if (continuations == 2 && value < 0x800u)
+      return false;               // overlong three-byte form of a one- or two-byte code point
+    if (continuations == 3 && value < 0x10000u)
+      return false;               // overlong four-byte form of a shorter code point
+    if (value >= 0xd800u && value <= 0xdfffu)
+      return false;               // UTF-16 surrogate half, never a valid UTF-8 scalar value
+    if (value > 0x10ffffu)
+      return false;               // above the Unicode code space
+    code_point = value;
+    pos += continuations + 1;
+    return true;
+  }
+  //------------------------------------------------------------------------------------------------------------------------------
+  // C0 (U+0000-U+001F), DEL (U+007F) and C1 (U+0080-U+009F). None of these has a rendering, and an
+  // operator who lists the wallet directory or greps a log has the bytes fed to their terminal: ESC
+  // starts a control sequence that can recolour, reposition or erase the surrounding output, CR and
+  // BS overwrite what was already printed, and LF splits one name across two lines.
+  bool is_control_code_point(std::uint32_t code_point)
+  {
+    return code_point <= 0x1fu || code_point == 0x7fu || (code_point >= 0x80u && code_point <= 0x9fu);
+  }
+  //------------------------------------------------------------------------------------------------------------------------------
+  // Bidirectional formatting controls. These reorder the characters around them when rendered, so a
+  // name can be made to display as a different name than the one stored on disk (the classic
+  // "wallet<RLO>sekips.keys" spoof). U+202A-U+202E are the embedding/override controls and
+  // U+2066-U+2069 the isolate controls, which are the modern spelling of the same reordering
+  // behaviour and are refused for the same reason; U+200E/U+200F are the marks.
+  bool is_bidi_control_code_point(std::uint32_t code_point)
+  {
+    return code_point == 0x200eu || code_point == 0x200fu
+        || (code_point >= 0x202au && code_point <= 0x202eu)
+        || (code_point >= 0x2066u && code_point <= 0x2069u);
+  }
+  //------------------------------------------------------------------------------------------------------------------------------
+  // Whitespace and zero-width separators that are invisible at the edge of a name: ASCII space, the
+  // Unicode space separators (U+00A0, U+1680, U+2000-U+200A, U+202F, U+205F, U+3000), the line and
+  // paragraph separators (U+2028, U+2029) and the two zero-width characters that are routinely
+  // pasted in from other documents (U+200B, U+FEFF). Tab, CR and LF are already covered by the C0
+  // class above.
+  bool is_edge_whitespace_code_point(std::uint32_t code_point)
+  {
+    return code_point == 0x20u || code_point == 0xa0u || code_point == 0x1680u
+        || (code_point >= 0x2000u && code_point <= 0x200au)
+        || code_point == 0x2028u || code_point == 0x2029u || code_point == 0x202fu
+        || code_point == 0x205fu || code_point == 0x3000u
+        || code_point == 0x200bu || code_point == 0xfeffu;
+  }
+  //------------------------------------------------------------------------------------------------------------------------------
+  // Classifies the code points of 'filename'. Returns nullptr when every code point is acceptable,
+  // otherwise a static, caller-independent reason string. The reason never quotes the offending name
+  // or byte: the whole point of refusing these code points is that they are unsafe to put in front
+  // of an operator, and an error body is read by an operator as surely as a directory listing is.
+  const char *wallet_filename_code_point_error(const std::string &filename)
+  {
+    std::uint32_t first = 0;
+    std::uint32_t last = 0;
+    for (std::size_t pos = 0; pos < filename.size(); )
+    {
+      const std::size_t at = pos;
+      std::uint32_t code_point = 0;
+      if (!utf8_next_code_point(filename, pos, code_point))
+        return "Invalid filename: not valid UTF-8";
+      if (is_control_code_point(code_point))
+        return "Invalid filename: control characters are not allowed";
+      if (is_bidi_control_code_point(code_point))
+        return "Invalid filename: bidirectional text controls are not allowed";
+      if (at == 0)
+        first = code_point;
+      last = code_point;
+    }
+    if (!filename.empty() && (is_edge_whitespace_code_point(first) || is_edge_whitespace_code_point(last)))
+      return "Invalid filename: leading or trailing whitespace is not allowed";
+    return nullptr;
+  }
+  //------------------------------------------------------------------------------------------------------------------------------
   // Single acceptance predicate for the RPC 'filename' field, shared by create_wallet, open_wallet,
   // generate_from_keys and restore_deterministic_wallet. Returns true when the name may be used as a
   // wallet name inside --wallet-dir; otherwise fills 'er' and returns false.
@@ -207,6 +337,19 @@ namespace
   //    never reopen. Handlers that generate their own seed pass require_name = true; the restore and
   //    generate handlers, where the caller supplies the seed or the keys and an unnamed wallet is a
   //    documented in-memory-only wallet, pass false.
+  //  - Control characters, bidirectional formatting controls, malformed UTF-8 and leading or trailing
+  //    whitespace are refused by wallet_filename_code_point_error above, each for the reason given at
+  //    its own predicate. The name is not a path once the rules above have run, but it is still
+  //    written to disk and shown to a human, and this server is the only place that decides what may
+  //    become a wallet name. Everything else is accepted on purpose: printable non-ASCII, including
+  //    accented letters and emoji, makes a legitimate wallet name in most of the world, and an inner
+  //    space is not ambiguous the way a leading or a trailing one is.
+  //  - Refusing rather than trimming the whitespace cases is deliberate: the caller is told why the
+  //    name was rejected instead of silently getting a wallet under a name it did not ask for. The
+  //    same rules apply on open_wallet, which is the trade this makes explicit: a wallet whose name
+  //    was accepted by the older, permissive validator has to be renamed on disk before it can be
+  //    opened through the RPC again. That is preferred over leaving an unopenable-by-any-other-means
+  //    name reachable, because the operator can rename the file and the RPC caller cannot.
   bool validate_wallet_filename(const std::string &filename, bool require_name, epee::json_rpc::error &er)
   {
     bool valid = filename.find('/') == std::string::npos;
@@ -224,6 +367,13 @@ namespace
     {
       er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
       er.message = "Invalid filename";
+      return false;
+    }
+    const char *code_point_error = wallet_filename_code_point_error(filename);
+    if (code_point_error != nullptr)
+    {
+      er.code = WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR;
+      er.message = code_point_error;
       return false;
     }
     return true;
@@ -386,6 +536,19 @@ namespace tools
         return false;
       }
       m_wallet_dir = command_line::get_arg(*m_vm, arg_wallet_dir);
+      // Every wallet this server creates is written inside this directory, so the
+      // value must name a directory. The mkdir below cannot establish that on its
+      // own: it treats EEXIST as success, so a path naming a regular file, a
+      // named pipe or a device was accepted and the server came up and served
+      // requests, with every create_wallet failing on "failed to save file"
+      // afterwards. Refuse it here, before the server binds. A path that does not
+      // exist yet is accepted - the mkdir below creates it.
+      std::string wallet_dir_error;
+      if (!tools::validate_path_argument(arg_wallet_dir.name, m_wallet_dir, tools::path_argument_kind::directory, wallet_dir_error))
+      {
+        LOG_ERROR(wallet_dir_error);
+        return false;
+      }
 #ifdef _WIN32
 #define MKDIR(path, mode)    mkdir(path)
 #else

@@ -47,7 +47,20 @@ namespace cryptonote
 namespace
 {
   constexpr const int num_zmq_threads = 1;
-  constexpr const std::int64_t max_frame_size = net::zmq::max_message_size;
+  /* Transport limit handed to `ZMQ_MAXMSGSIZE` below. It is deliberately
+     larger than `net::zmq::max_message_size`, the application limit that
+     `net::zmq::receive` enforces: libzmq drops a frame that exceeds
+     `ZMQ_MAXMSGSIZE` inside its decoder and disconnects the peer, so a request
+     refused by the transport can never be answered. Keeping the transport
+     limit above the application limit is what lets an over-large request reach
+     `receive`, fail with `EMSGSIZE`, and receive the `REQUEST_TOO_LARGE()`
+     reply sent in `ZmqServer::serve` below. */
+  constexpr const std::int64_t max_frame_size = static_cast<std::int64_t>(net::zmq::max_frame_size);
+  static_assert(
+    static_cast<std::int64_t>(net::zmq::max_message_size) < max_frame_size,
+    "ZMQ_MAXMSGSIZE must exceed net::zmq::max_message_size, otherwise libzmq drops the "
+    "over-large frame in its decoder and the REQUEST_TOO_LARGE reply is unreachable"
+  );
   constexpr const std::chrono::seconds linger_timeout{2}; // wait period for pending out messages
   constexpr const int ipv6_option = 1;
 

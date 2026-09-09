@@ -12,6 +12,11 @@
 #  LibUSB_INCLUDE_DIRS: the directory that contains the include file
 #  LibUSB_LIBRARIES:    the library
 # source: https://github.com/IntelRealSense/librealsense
+#
+# Monero addition: the libudev handling at the end of this module, and the one
+# configuration in which libudev is a mandatory build dependency, are described
+# in docs/COMPILING_DEBUGGING_TESTING.md, section "Build-system changes beyond
+# the dialect switch".
 
 include ( CheckLibraryExists )
 include ( CheckIncludeFile )

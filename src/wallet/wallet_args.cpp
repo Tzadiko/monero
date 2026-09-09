@@ -63,6 +63,49 @@ namespace
     std::stringstream ss;
     bool emphasis;
   };
+
+  /*!
+   * \brief Checks a --log-file path, returning why it is unusable.
+   *
+   * The logging layer refuses to write through a symbolic link or to anything that is not a
+   * regular file, and continues with file logging disabled when it has to (mlog_configure() in
+   * contrib/epee/src/mlog.cpp): appending log data through a link writes it outside the
+   * directory the operator chose, and a FIFO or a device in place of the log file is never what
+   * was meant. A wallet that was explicitly told where to log should not start with its log
+   * silently going nowhere - the wallet log carries addresses, transaction ids and, at verbose
+   * levels, whole RPC payloads - so the same rules are applied here, where the option name can
+   * still be named in the message, exactly as the daemon does in src/daemon/main.cpp. The path
+   * is only inspected, never created: creating it belongs to mlog_configure(), which does it
+   * with the restrictive mode and the O_NOFOLLOW this check relies on.
+   *
+   * \param log_path The log file path as it will be passed to mlog_configure().
+   * \return An empty string when the path is usable, otherwise the reason it is not.
+   */
+  std::string log_file_rejection_reason(const std::string &log_path)
+  {
+    namespace bf = boost::filesystem;
+
+    boost::system::error_code ec;
+    // symlink_status() does not follow the final component - the component under test.
+    const bf::file_status status = bf::symlink_status(log_path, ec);
+    if (status.type() == bf::file_not_found)
+    {
+      // The usual first run: the file is created by mlog_configure(), along with any missing
+      // parent directory. Boost reports a missing path as file_not_found *and* sets ec, so only
+      // an error other than "does not exist" matters here - a parent component that is not a
+      // directory, or one that cannot be searched, also comes back as file_not_found.
+      if (ec && ec != boost::system::errc::no_such_file_or_directory)
+        return "it cannot be examined: " + ec.message();
+      return std::string();
+    }
+    if (ec)
+      return "it cannot be examined: " + ec.message();
+    if (status.type() == bf::symlink_file)
+      return "it is a symbolic link; specify the real file path";
+    if (status.type() != bf::regular_file)
+      return "it is not a regular file; specify a plain file path";
+    return std::string();
+  }
 }
 
 namespace wallet_args
@@ -164,11 +207,26 @@ namespace wallet_args
         boost::system::error_code ec;
         if (bf::exists(config_path, ec))
         {
+          // The value is about to be opened and parsed as a config file, so refuse
+          // an existing name that cannot be one. A named pipe with no writer is
+          // the case that matters: the open blocks forever, so the wallet never
+          // starts and never explains why, not even when killed by a timeout.
+          // This validation covers monero-wallet-cli, monero-wallet-rpc and
+          // monero-gen-trusted-multisig, which all take --config-file through here.
+          std::string config_error;
+          if (!tools::validate_path_argument(arg_config_file.name, config, tools::path_argument_kind::existing_file, config_error))
+          {
+            MERROR(config_error);
+            return false;
+          }
           po::store(po::parse_config_file<char>(config_path.string<std::string>().c_str(), desc_params), vm);
         }
         else
         {
-          MERROR(wallet_args::tr("Can't find config file ") << config);
+          // Echo the value through describe_path_argument(): the kernel accepts
+          // 128 KiB in a single argument, and an unbounded echo of a wrong path
+          // buries the message it belongs to.
+          MERROR(wallet_args::tr("Can't find config file ") << tools::describe_path_argument(config));
           return false;
         }
       }
@@ -184,9 +242,36 @@ namespace wallet_args
 
     std::string log_path;
     if (!command_line::is_arg_defaulted(vm, arg_log_file))
+    {
       log_path = command_line::get_arg(vm, arg_log_file);
+      // mlog_configure() has no way to report a bad log path, so an unusable
+      // value would leave the wallet running with no log file and no complaint,
+      // and a named pipe with no writer would block the open before any logging
+      // exists to report it. Validate here, while the option can still be named.
+      std::string log_file_error;
+      if (!tools::validate_path_argument(arg_log_file.name, log_path, tools::path_argument_kind::output_file, log_file_error))
+      {
+        Print(print, true) << log_file_error;
+        return {boost::none, true};
+      }
+    }
     else
       log_path = mlog_get_default_log_path(default_log_name);
+
+    // Reject an unusable log file before mlog_configure() is given it. mlog_configure()
+    // enforces the same rules at the epee layer - it will not write through a symbolic link,
+    // which would append log data outside the intended directory, nor to a FIFO or a device -
+    // but all it can do then is carry on with file logging disabled, which for a wallet that
+    // was told where to log means a running process and no log at all. Refusing here names the
+    // option in the diagnostic; MERROR is the channel this function already uses for the
+    // config-file failure above, which is likewise raised before logging is configured.
+    const std::string log_file_rejection = log_file_rejection_reason(log_path);
+    if (!log_file_rejection.empty())
+    {
+      MERROR(wallet_args::tr("Invalid --log-file ") << log_path << ": " << log_file_rejection);
+      return {boost::none, true};
+    }
+
     mlog_configure(log_path, log_to_console, command_line::get_arg(vm, arg_max_log_file_size), command_line::get_arg(vm, arg_max_log_files));
     if (!command_line::is_arg_defaulted(vm, arg_log_level))
     {

@@ -682,6 +682,23 @@ if (APPLE AND NOT IOS)
   endif()
 endif()
 
+# SECURITY / VERSION-CURRENCY NOTE (reviewed 2026-09-08) - SEC4-F15-openssl-floor-eol
+# The floor declared below (1.1.1) is end-of-life, and so is the 3.0 LTS branch.
+# Advisories / EOL: OpenSSL 1.1.1 and 1.0.2 are no longer supported upstream, and
+#   security support for the 3.0 LTS branch ended 2026-09-07; the supported lines are
+#   3.5 (LTS, to 2030-04-08) and the 4.0 series. A forward-looking floor is therefore
+#   >= 3.5, not >= 3.2: 3.2 (EOL Nov 2025), 3.3 (EOL Apr 2026) and 3.4 (EOL Oct 2026)
+#   are already end-of-life or imminently so.
+# Exposure here: this argument is a minimum accepted by find_package, not the version
+#   any artifact links - every verified build configuration links OpenSSL 3.x (the
+#   depends cross-build pins 3.5.7; distribution builds link the platform 3.x). The
+#   residual risk is that a downstream builder can satisfy the declared floor with an
+#   end-of-life TLS stack and still pass configure.
+# Floor retained deliberately: AAP 0.2.2 retains it - OpenSSL is a C library consumed
+#   inside extern "C", so the C++23 language-standard change cannot move its floor - and
+#   this file's own change-set contract lists the find_package line as must-not-change.
+# Maintainer action when the freeze lifts: raise the argument to 3.5 as a separate
+#   dependency-policy change, coordinated with the README and docs dependency tables.
 find_package(OpenSSL 1.1.1 REQUIRED)
 message(STATUS "Using OpenSSL include dir at ${OPENSSL_INCLUDE_DIR}")
 include_directories(${OPENSSL_INCLUDE_DIR})
@@ -902,6 +919,31 @@ include(CheckTrezor)
   endif()
 
   # New in GCC 8.2
+  #
+  # This emits the endbr64 landing pads and the x86 CET property
+  # (GNU_PROPERTY_X86_FEATURE_1_AND, IBT and SHSTK) in every C and C++ object,
+  # but on x86-64 ELF the linker ANDs that property across all inputs, so a
+  # single input without it clears it for the whole output. CET is therefore
+  # compiled in but not advertised in .note.gnu.property on x86-64: of the 13
+  # executables only monero-gen-ssl-cert carries the note, because it alone
+  # pulls in neither an assembler object nor a Rust object. Linking monerod
+  # reports 17 inputs without the property (list them with
+  # -Wl,-z,cet-report=warning): the 14 supercop ed25519 .s objects,
+  # CryptonightR_template.S, RandomX's jit_compiler_x86_static.S, and one
+  # libfcmp_pp_rust.a code-generation unit.
+  #
+  # Passing this flag to those compilations would not change that - gcc emits
+  # no property for assembler input and produces byte-identical objects with
+  # and without it, and -Wa,-mx86-used-note=yes emits only the "ISA used" and
+  # "feature used" notes, never FEATURE_1_AND. Forcing the property at link
+  # time with -Wl,-z,ibt -Wl,-z,shstk would assert a guarantee these binaries
+  # do not meet: cn/r hashing calls JIT-generated code through hp_jitfunc in
+  # src/crypto/slow-hash.c, and RandomX's JIT does the same, with entry points
+  # that carry no endbr64, so an IBT-enforcing loader would fault them.
+  # Advertising CET needs .note.gnu.property in the assembler sources and a
+  # Rust toolchain that emits it; every other hardening property (RELRO,
+  # BIND_NOW, PIE, non-executable stack, stack canaries, fortify) is present
+  # on all 13 binaries.
   if (NOT OPENBSD AND NOT (WIN32 AND (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS 9.1)))
     add_c_flag_if_supported(-fcf-protection=full C_SECURITY_FLAGS)
     add_cxx_flag_if_supported(-fcf-protection=full CXX_SECURITY_FLAGS)
@@ -939,6 +981,28 @@ include(CheckTrezor)
   if (noexecheap_SUPPORTED)
     set(LD_SECURITY_FLAGS "${LD_SECURITY_FLAGS} -Wl,-z,noexecheap")
   endif()
+
+  # Exported-symbol surface of the executables. Nothing here restricts symbol
+  # visibility, so an executable exports the vague-linkage entities it has to
+  # share with the shared libraries it links: monerod exports 103 dynamic
+  # symbols: 73 typeinfo/vtable objects, 24 weak function instantiations,
+  # 4 Boost singletons (the error-category holders and Boost.Serialization's
+  # singleton lock), epee's mtrace logging helper and the C runtime's
+  # _IO_stdin_used marker.
+  #
+  # Building as C++23 rather than C++17 adds 23 symbols across the 13
+  # executables and removes none. All 23 are weak std::__cxx11::basic_string
+  # members and none is first-party: from C++20 onwards libstdc++ suppresses
+  # its own "extern template class basic_string<char>" instantiation
+  # declaration (bits/basic_string.tcc), so each translation unit instantiates
+  # the string members it uses instead of importing them from libstdc++.so.
+  # -fvisibility=hidden does not hide them, because libstdc++ gives its own
+  # entities default visibility; -fvisibility-inlines-hidden does, but it also
+  # hides the typeinfos, vtables and function-local statics listed above, which
+  # the executables and the Boost and libstdc++ shared libraries must resolve
+  # to one definition for exception matching and singleton identity. Pinning
+  # this surface therefore belongs in a linker version script that enumerates
+  # what may be exported, rather than in a global visibility switch.
 
   # some windows linker bits
   if (WIN32)

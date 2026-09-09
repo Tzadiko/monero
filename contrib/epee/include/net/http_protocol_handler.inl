@@ -57,6 +57,99 @@ namespace net_utils
 			std::string m_body;
 		};
 
+		//! Placeholder written instead of an HTTP authentication credential.
+		static constexpr const char http_redacted_credential[] = "<redacted>";
+
+		/*!
+		 * \brief Replaces the value of every HTTP authentication field in a raw header block
+		 *        with a placeholder, so that a raw header dump can be logged safely.
+		 *
+		 * The request header block carries the client's credentials: `Authorization: Basic
+		 * <base64(user:password)>` is a cleartext password (base64 is trivially reversible) and
+		 * `Authorization: Digest ...` carries the user name, the nonce and the response hash.
+		 * The raw block is dumped to the log by the TRACE request-header trace (log levels 3 and
+		 * 4) and, on a malformed request, by two ERROR traces that are emitted at the default log
+		 * level - so without redaction an RPC password reaches the log file, which on the daemon
+		 * side is shared with everything else the operator collects. Only the field value is
+		 * removed; the authentication scheme token is kept because it is the diagnostically
+		 * useful part, and every other byte of the block is copied through unchanged so the two
+		 * ERROR dumps keep their value on exactly the malformed input that triggers them.
+		 *
+		 * \param head Raw header bytes, possibly truncated or not a header block at all.
+		 * \return \p head with the value of each `Authorization` / `Proxy-Authorization` field
+		 *         replaced by the scheme token (when present) plus `<redacted>`. Line structure
+		 *         (`\r\n` or bare `\n`) is preserved. Never throws: it runs inside a log
+		 *         statement on a connection thread and on adversarial input.
+		 */
+		inline std::string redact_credential_fields(boost::string_view head) noexcept
+		{
+			//! Longest scheme token echoed into the log; longer runs are not schemes.
+			static constexpr const size_t max_scheme_len = 24;
+
+			try
+			{
+				std::string out;
+				out.reserve(head.size() + sizeof(http_redacted_credential));
+				while(!head.empty())
+				{
+					const size_t line_end = head.find('\n');
+					const boost::string_view line = line_end == boost::string_view::npos ?
+						head : head.substr(0, line_end);
+
+					boost::string_view name;
+					boost::string_view value;
+					if(detail::parse_header_line(line, name, value) &&
+						(boost::iequals(name, "Authorization") || boost::iequals(name, "Proxy-Authorization")))
+					{
+						out.append(name.data(), name.size()).append(": ");
+
+						// Leading run of scheme characters, kept only when the value actually
+						// continues past it: a lone token is the credential itself (a bare base64
+						// blob, or a "token68" value) and must not be echoed.
+						size_t scheme_len = 0;
+						while(scheme_len < value.size() && scheme_len <= max_scheme_len)
+						{
+							const char c = value[scheme_len];
+							const bool scheme_char = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+								(c >= '0' && c <= '9') || c == '-';
+							if(!scheme_char)
+								break;
+							++scheme_len;
+						}
+						if(scheme_len != 0 && scheme_len <= max_scheme_len && scheme_len < value.size() &&
+							(value[scheme_len] == ' ' || value[scheme_len] == '\t'))
+						{
+							out.append(value.data(), scheme_len).append(1, ' ');
+						}
+						out.append(http_redacted_credential);
+
+						// parse_header_line() drops a trailing CR; put it back so the dump keeps
+						// the exact line shape the peer sent.
+						if(!line.empty() && line.back() == '\r')
+							out.append(1, '\r');
+					}
+					else
+					{
+						// Not a well-formed field (including the request line, the blank
+						// separator line and any garbage): copy every byte through.
+						out.append(line.data(), line.size());
+					}
+
+					if(line_end == boost::string_view::npos)
+						break;
+					out.append(1, '\n');
+					head.remove_prefix(line_end + 1);
+				}
+				return out;
+			}
+			catch(...)
+			{
+				// Only an allocation failure can land here. Short enough to need no allocation
+				// of its own, so the log statement still gets a value instead of an exception.
+				return std::string("<unavailable>");
+			}
+		}
+
 		inline
 			bool match_boundary(const std::string& content_type, std::string& boundary)
 		{
@@ -430,7 +523,7 @@ namespace net_utils
 		}else
 		{
 			m_state = http_state_error;
-			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::handle_invoke_query_line(): Failed to match first line: " << m_cache);
+			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::handle_invoke_query_line(): Failed to match first line: " << redact_credential_fields(boost::string_view{m_cache.data(), m_cache.size()}));
 			return false;
 		}
 
@@ -454,14 +547,14 @@ namespace net_utils
   template<class t_connection_context>
 	bool simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(size_t pos)
 	{ 
-		LOG_PRINT_L3("HTTP HEAD:\r\n" << m_cache.substr(0, pos));
+		LOG_PRINT_L3("HTTP HEAD:\r\n" << redact_credential_fields(boost::string_view{m_cache.data(), pos}));
 
 		m_query_info.m_full_request_buf_size = pos;
     m_query_info.m_request_head.assign(m_cache.begin(), m_cache.begin()+pos); 
 
 		if(!parse_cached_header(m_query_info.m_header_info, m_cache, pos))
 		{
-			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(): failed to anilize request header: " << m_cache);
+			LOG_ERROR_CC(m_conn_context, "simple_http_connection_handler<t_connection_context>::analize_cached_request_header_and_invoke_state(): failed to anilize request header: " << redact_credential_fields(boost::string_view{m_cache.data(), m_cache.size()}));
 			m_state = http_state_error;
 			return false;
 		}

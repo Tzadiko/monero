@@ -117,7 +117,13 @@ FullMessage::FullMessage(std::string&& json_string, bool request)
 
 std::string FullMessage::getRequestType() const
 {
-  return get_method_field(doc).GetString();
+  /* A JSON string is a counted byte sequence, not a C string - it may contain
+     embedded NUL bytes. Build the name from the parsed length instead of
+     letting the `const char*` conversion stop at the first NUL, so that a name
+     which merely shares a prefix with a real method (`stop_mining\0get_info`)
+     cannot be truncated into that method and select it. */
+  const rapidjson::Value& method = get_method_field(doc);
+  return std::string{method.GetString(), method.GetStringLength()};
 }
 
 const rapidjson::Value& FullMessage::getMessage() const

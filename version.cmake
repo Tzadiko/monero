@@ -16,5 +16,8 @@
 # The file is valid CMake so that it can be included, but GitVersion.cmake parses
 # it textually: an archive is untrusted input, and an unsubstituted placeholder
 # must never be mistaken for a commit hash.
+#
+# docs/COMPILING_DEBUGGING_TESTING.md, section "Build-system changes beyond the
+# dialect switch", describes the whole flow and why it was added.
 set(MONERO_ARCHIVE_COMMIT_HASH "$Format:%H$")
 set(MONERO_ARCHIVE_COMMIT_REFS "$Format:%D$")

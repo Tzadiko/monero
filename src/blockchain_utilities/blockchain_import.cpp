@@ -41,6 +41,7 @@
 #include "cryptonote_basic/cryptonote_format_utils.h"
 #include "serialization/binary_utils.h" // dump_binary(), parse_binary()
 #include "include_base_utils.h"
+#include "common/util.h"
 #include "cryptonote_core/cryptonote_core.h"
 
 #undef MONERO_DEFAULT_LOG_CATEGORY
@@ -776,6 +777,25 @@ int main(int argc, char* argv[])
     fs_import_file_path = boost::filesystem::path(m_config_folder) / "export" / BLOCKCHAIN_RAW;
 
   import_file_path = fs_import_file_path.string();
+
+  // A supplied --input-file is read block by block further down. Validate it now,
+  // because the read is where an unusable value turns into something worse than
+  // an error: opening a named pipe with no writer blocks this process forever,
+  // with no diagnostic and nothing for a timeout to report, and the existing
+  // failure path only says "import_file.open() fail" after the database has
+  // already been opened. Only an explicitly supplied value is checked, so that
+  // --pop-blocks and --drop-hf, which never touch the bootstrap file, keep
+  // working without one, and the default <data-dir>/export path keeps its
+  // current behaviour.
+  if (command_line::has_arg(vm, arg_input_file))
+  {
+    std::string input_file_error;
+    if (!tools::validate_path_argument(arg_input_file.name, import_file_path, tools::path_argument_kind::existing_file, input_file_error))
+    {
+      MFATAL(input_file_error);
+      return 1;
+    }
+  }
 
   if (command_line::has_arg(vm, arg_count_blocks))
   {

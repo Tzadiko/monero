@@ -1,4 +1,19 @@
 package=ncurses
+# SECURITY / VERSION-CURRENCY NOTE (reviewed 2026-09-08) - SEC4-F19-ncurses-pin-cve
+# The pinned 6.1 is affected by CVE-2023-29491, but the flaw's precondition is not met here.
+# Advisories: CVE-2023-29491 - ncurses before 6.4-20230408, when used by a setuid or setgid
+#   application, lets a local user trigger security-relevant memory corruption through malformed
+#   data in a terminfo database file found in $HOME/.terminfo or reached via the TERMINFO or TERM
+#   environment variable. It is exploitable only through such a privileged consumer.
+# Exposure here: not reachable, proven. All 13 built binaries are mode 0755 and a search for any
+#   setuid/setgid bit (find build/bin -perm /6000) returns nothing, so a stock installation cannot
+#   meet the precondition. This recipe also configures --without-cxx-binding, --without-cxx and
+#   --without-progs, so none of the terminfo-consuming utilities is produced; only the libraries
+#   are staged, for the readline recipe that declares ncurses as its dependency.
+# Pin frozen deliberately: AAP 0.2.2 keeps every contrib/depends recipe version as pinned,
+#   because changing a recipe alters reproducible-build inputs.
+# Maintainer action when the freeze lifts: move this pin to ncurses 6.4-20230408 or newer and
+#   re-pin $(package)_sha256_hash.
 $(package)_version=6.1
 $(package)_download_path=https://ftp.gnu.org/gnu/ncurses
 $(package)_file_name=$(package)-$($(package)_version).tar.gz

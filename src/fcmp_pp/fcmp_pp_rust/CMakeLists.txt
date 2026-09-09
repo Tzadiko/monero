@@ -106,6 +106,32 @@ if(NOT CARGO_EXECUTABLE)
   endif()
 endif()
 
+# Options appended to each of the three cargo command lines below. The default
+# enforces the lockfile: with --locked, cargo fails instead of quietly
+# re-resolving when Cargo.toml and Cargo.lock disagree, so the crate graph
+# compiled into this consensus-adjacent static library is exactly the one
+# src/fcmp_pp/fcmp_pp_rust/Cargo.lock pins, including its two git dependencies,
+# whose exact commits only that lockfile records. Those three command lines have
+# expanded this variable since the rule was written, but nothing ever defined it,
+# so the expansion was empty and every build was free to re-resolve.
+#
+# --offline is deliberately not in the default: a clean checkout with an
+# unpopulated crate cache has to build, and the depends and StageX release paths
+# reach cargo through this same rule. A build that must be hermetic asks for it
+# explicitly with -DCARGO_OPTIONS="--locked;--offline" -- a CMake semicolon list,
+# so each element arrives as its own argument through the VERBATIM custom command
+# below -- and cargo equally honours CARGO_NET_OFFLINE=true from the environment.
+# Such a value replaces this default rather than adding to it, so a caller that
+# passes options of its own keeps --locked among them; a packager who genuinely
+# needs cargo to re-resolve sets -DCARGO_OPTIONS= to pass nothing at all. The one
+# in-tree caller, contrib/guix/libexec/build.sh, needs no change on that account:
+# contrib/guix/rust/cargo.sh vendors that build's crates with `cargo vendor
+# --locked` into a hash-pinned archive which contrib/guix/rust/config.toml
+# substitutes for every source, pinning the same graph earlier and with no
+# network at all.
+set(CARGO_OPTIONS "--locked" CACHE STRING
+    "Options passed to every cargo invocation that builds src/fcmp_pp/fcmp_pp_rust; the default --locked makes cargo fail rather than re-resolve when Cargo.toml and Cargo.lock disagree, so the crate graph that is built is exactly the one Cargo.lock pins.")
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   if(SANITIZE)
     message(STATUS "Using Rust ASAN")

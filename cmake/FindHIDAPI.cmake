@@ -22,6 +22,11 @@
 # Distributed under the Boost Software License, Version 1.0.
 # (See accompanying file LICENSE_1_0.txt or copy at
 # http://www.boost.org/LICENSE_1_0.txt)
+#
+# Monero addition: the libudev handling below, and the one configuration in
+# which libudev is a mandatory build dependency, are described in
+# docs/COMPILING_DEBUGGING_TESTING.md, section "Build-system changes beyond the
+# dialect switch".
 
 find_library(HIDAPI_LIBRARY
   NAMES hidapi hidapi-libusb)

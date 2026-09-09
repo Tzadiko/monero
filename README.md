@@ -147,18 +147,18 @@ The following table summarizes the tools and libraries required to build. A few 
 | OpenSSL     | 1.1.1                                                                              | NO       | `libssl-dev`        | `openssl`    | `openssl-devel`   | `openssl-devel`     | NO       | cryptography (C API; 3.5.3 verified, 3.5.7 in depends)         |
 | libzmq      | 4.2.0                                                                              | NO       | `libzmq3-dev`       | `zeromq`     | `zeromq-devel`    | `zeromq-devel`      | NO       | ZeroMQ library                                                 |
 | libunbound  | 1.4.16                                                                             | NO       | `libunbound-dev`    | `unbound`    | `unbound-devel`   | `unbound-devel`     | NO       | DNS resolver                                                   |
-| libsodium   | ?                                                                                  | NO       | `libsodium-dev`     | `libsodium`  | `libsodium-devel` | `libsodium-devel`   | NO       | cryptography                                                   |
-| libunwind   | any                                                                                | NO       | `libunwind-dev`     | `libunwind`  | `libunwind-devel` | `libunwind-devel`   | YES      | Stack traces                                                   |
+| libsodium   | any                                                                                | NO       | `libsodium-dev`     | `libsodium`  | `libsodium-devel` | `libsodium-devel`   | NO       | cryptography (any; 1.0.18 verified and pinned in depends)      |
+| libunwind   | any                                                                                | NO       | `libunwind-dev`     | `libunwind`  | `libunwind-devel` | `libunwind-devel`   | YES      | Stack traces (non-Release builds with a non-GNU compiler)      |
 | libreadline | 6.3.0                                                                              | NO       | `libreadline-dev`   | `readline`   | `readline-devel`  | `readline-devel`    | YES      | Input editing                                                  |
 | GTest       | 1.5                                                                                | YES      | `libgtest-dev`      | `gtest`      | `gtest-devel`     | `gtest-devel`       | YES      | Test suite                                                     |
 | ccache      | any                                                                                | NO       | `ccache`            | `ccache`     | `ccache`          | `ccache`            | YES      | Compil. cache                                                  |
 | Doxygen     | any                                                                                | NO       | `doxygen`           | `doxygen`    | `doxygen`         | `doxygen`           | YES      | Documentation                                                  |
 | Graphviz    | any                                                                                | NO       | `graphviz`          | `graphviz`   | `graphviz`        | `graphviz`          | YES      | Documentation                                                  |
-| libhidapi   | ?                                                                                  | NO       | `libhidapi-dev`     | `hidapi`     | `hidapi-devel`    | `hidapi-devel`      | YES      | Hardware wallet                                                |
-| libusb      | ?                                                                                  | NO       | `libusb-1.0-0-dev`  | `libusb`     | `libusb-devel`    | `libusb1-devel`     | YES      | Hardware wallet                                                |
+| libhidapi   | any                                                                                | NO       | `libhidapi-dev`     | `hidapi`     | `hidapi-devel`    | `hidapi-devel`      | YES      | Hardware wallet (any; 0.14.0 verified, 0.15.0 in depends)      |
+| libusb      | 1.0.16                                                                             | NO       | `libusb-1.0-0-dev`  | `libusb`     | `libusb-devel`    | `libusb1-devel`     | YES      | Hardware wallet (1.0.29 verified, 1.0.30 in depends)           |
 | libudev     | any                                                                                | NO       | `libudev-dev`       | `systemd-libs` | `eudev-libudev-devel` | `systemd-devel`     | YES      | udev backend of a statically linked libusb/libhidapi           |
-| libprotobuf | ?                                                                                  | NO       | `libprotobuf-dev`   | `protobuf`   | `protobuf-devel`  | `protobuf-devel`    | YES      | Hardware wallet                                                |
-| protoc      | ?                                                                                  | NO       | `protobuf-compiler` | `protobuf`   | `protobuf`        | `protobuf-compiler` | YES      | Hardware wallet                                                |
+| libprotobuf | any, matching protoc                                                               | NO       | `libprotobuf-dev`   | `protobuf`   | `protobuf-devel`  | `protobuf-devel`    | YES      | Hardware wallet (3.21.12 verified; same release in depends)    |
+| protoc      | any, matching libprotobuf                                                          | NO       | `protobuf-compiler` | `protobuf`   | `protobuf`        | `protobuf-compiler` | YES      | Hardware wallet (3.21.12 verified; same release in depends)    |
 
 Rust and `cargo` are required on `master`. Install them with rustup (as CI
 does) on every platform, or from the distribution package where one is named
@@ -199,7 +199,11 @@ install the toolchain through rustup.
 The three `python3-*` packages provide the modules the functional tests
 import. Without them CMake configures with a warning and silently skips
 `functional_tests_rpc` and `check_missing_rpc_methods`, so `ctest -N` reports
-22 registered tests instead of 24. `libudev-dev` is only needed for
+22 registered tests instead of 24. They are test tooling only — the harness
+under `tests/functional_tests/` and the client in `utils/python-rpc/` import
+them, and no daemon, wallet or library built here does — and no version is
+required: the suite has been run with Python 3.13.7, requests 2.33.1, pyzmq
+27.2.0 and deepdiff 9.1.0. `libudev-dev` is only needed for
 statically linked builds (`make release-static`, `-DSTATIC=ON`), where the
 udev backend of the system libusb and libhidapi archives has to be linked in.
 

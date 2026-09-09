@@ -2597,6 +2597,52 @@ TEST(zmq, read_write)
     EXPECT_EQ(message, *received);
 }
 
+TEST(zmq, read_oversized_message)
+{
+    /* The transport limit that `cryptonote::rpc::ZmqServer` hands to
+       `ZMQ_MAXMSGSIZE` (`net::zmq::max_frame_size`) must stay strictly above
+       the application limit that `net::zmq::receive` enforces
+       (`net::zmq::max_message_size`). If the two were equal, libzmq would drop
+       every frame able to trip the application check inside its own decoder,
+       and the `REQUEST_TOO_LARGE` reply in `ZmqServer::serve` would be
+       unreachable. */
+    ASSERT_LT(net::zmq::max_message_size, net::zmq::max_frame_size);
+
+    net::zmq::context context{zmq_init(1)};
+    ASSERT_NE(nullptr, context);
+
+    net::zmq::socket send_socket{zmq_socket(context.get(), ZMQ_REQ)};
+    net::zmq::socket recv_socket{zmq_socket(context.get(), ZMQ_REP)};
+    ASSERT_NE(nullptr, send_socket);
+    ASSERT_NE(nullptr, recv_socket);
+
+    /* `ZMQ_MAXMSGSIZE` is deliberately left at its default on these sockets:
+       `inproc://` does not run the libzmq decoder that enforces the option, so
+       setting it here would prove nothing about the transport while risking a
+       receive that never returns. What is under test is the application limit
+       and the state the socket is left in once it trips. */
+    ASSERT_EQ(0u, zmq_bind(recv_socket.get(), "inproc://testing"));
+    ASSERT_EQ(0u, zmq_connect(send_socket.get(), "inproc://testing"));
+
+    // one byte past the application limit, and well inside the transport limit
+    const std::string message(net::zmq::max_message_size + 1, 'a');
+    ASSERT_TRUE(bool(net::zmq::send(epee::strspan<std::uint8_t>(message), send_socket.get())));
+
+    const expect<std::string> received = net::zmq::receive(recv_socket.get());
+    ASSERT_FALSE(bool(received));
+    EXPECT_EQ(net::zmq::make_error_code(EMSGSIZE), received.error());
+
+    /* `receive` consumes every part of the over-large message before failing,
+       so the reply path stays open - this is what makes the server's structured
+       `REQUEST_TOO_LARGE` answer possible instead of a silent drop. */
+    const std::string reply{"Request too large"};
+    ASSERT_TRUE(bool(net::zmq::send(epee::strspan<std::uint8_t>(reply), recv_socket.get())));
+
+    const expect<std::string> received_reply = net::zmq::receive(send_socket.get());
+    ASSERT_TRUE(bool(received_reply));
+    EXPECT_EQ(reply, *received_reply);
+}
+
 TEST(zmq, read_write_slice)
 {
     net::zmq::context context{zmq_init(1)};
