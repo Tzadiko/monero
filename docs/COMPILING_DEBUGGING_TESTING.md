@@ -112,6 +112,40 @@ reproduce. Those runs are the pre-acceptance gates themselves, and no
 in-repository remediation for them is recorded: until both pass, this row
 claims nothing beyond the pins.
 
+One property of those release paths is known in advance and is recorded here
+rather than resolved in the tree, because resolving it would change a pinned
+recipe. Every *target* C++ recipe receives the host `CXXFLAGS`, so under this
+dialect the pinned protobuf-cpp 3.21.12 is compiled as C++23 for the first
+time, and its own headers and generated code combine two enumeration types
+with `|` — the `field_layout` constants in
+`google/protobuf/generated_message_tctable_impl.h`, such as
+`kBool = kFkVarint | kRep8Bits`. C++20 deprecated that operation, so GCC and
+Clang emit `-Wdeprecated-enum-enum-conversion` where C++17 emitted nothing.
+The measured scope, from the release-path acceptance run, is about 105 new
+diagnostics per host on each of the ten depends cross hosts and each of the
+eight Guix triples, with zero at C++17; a syntax-only compile of the pinned
+protobuf-cpp 3.21.12 library sources with GCC 14.3.0 reproduces that count from
+35 distinct lines of that single upstream header.
+
+The diagnostics are third-party by origin — they are emitted from protobuf's
+own headers and generated code, not from any first-party translation unit — so
+they add no first-party warning origin and no first-party trace location, and
+the no-new-warnings criterion for the acceptance configurations above is
+unaffected. That is the same treatment the Boost 1.83 Beast deprecation gets
+under "Libraries", and nothing is suppressed for either: no `-Wno-*` flag and
+no diagnostic pragma is added anywhere, and the pinned protobuf version stays
+as it is, because a recipe version is a reproducible-build input. Two
+remediations are available to the maintainers, and choosing either one is a
+decision taken outside a language-standard migration: upgrade the protobuf
+recipe to an upstream release whose generated code and headers are C++20-clean,
+which changes the depends inputs and invalidates every depends cache; or give
+that one recipe a dialect exception through its
+`$(package)_cxxflags_$(host_os)` hook — the mechanism
+`contrib/depends/packages/zeromq.mk` already uses for `mingw32` — leaving the
+first-party dialect at 23. An exception applied that way is recorded in this
+section, so that the dialect a release path actually compiles a recipe with is
+never implicit.
+
 Unknown compiler IDs and the `clang-cl` frontend are rejected at configure
 time, because this repository has no MSVC build path: Windows is built with
 MinGW-w64 GCC through MSYS2 UCRT64. The guard branches on

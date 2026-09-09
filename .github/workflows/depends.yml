@@ -85,7 +85,7 @@ jobs:
           deb http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main
           deb-src http://apt.llvm.org/noble/ llvm-toolchain-noble-19 main
           EOF
-          curl https://apt.llvm.org/llvm-snapshot.gpg.key > /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          curl --retry 5 --retry-all-errors --retry-delay 5 --fail --silent --show-error --location --output /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key
           echo "/usr/lib/llvm-19/bin/" >> $GITHUB_PATH
     - name: install dependencies
       run: apt update; apt -y install build-essential cmake pkg-config git ccache ${{ matrix.toolchain.packages }}
