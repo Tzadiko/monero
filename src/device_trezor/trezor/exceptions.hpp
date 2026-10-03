@@ -46,7 +46,7 @@ namespace exc {
     SecurityException(): reason("General Security exception"){}
     explicit SecurityException(std::string what): reason(what){}
 
-    virtual const char* what() const noexcept {
+    virtual const char* what() const throw() {
       return reason.get().c_str();
     }
   };
@@ -65,7 +65,7 @@ namespace exc {
     TrezorException(): reason("General Trezor exception"){}
     explicit TrezorException(std::string what): reason(what){}
 
-    virtual const char* what() const noexcept {
+    virtual const char* what() const throw() {
       return reason.get().c_str();
     }
   };
