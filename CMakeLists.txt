@@ -99,7 +99,7 @@ if (USE_COMPILATION_TIME_PROFILER)
 	add_compile_options("-ftime-trace")
 endif()
 
-if (${CMAKE_VERSION} VERSION_GREATER "3.0.0" AND CMAKE_MAKE_PROGRAM MATCHES "ninja")
+if (CMAKE_MAKE_PROGRAM MATCHES "ninja")
   set(MONERO_PARALLEL_COMPILE_JOBS "" CACHE STRING "The maximum number of concurrent compilation jobs.")
   if (MONERO_PARALLEL_COMPILE_JOBS)
     set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_job_pool=${MONERO_PARALLEL_COMPILE_JOBS})
@@ -137,10 +137,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Enforce the compiler-family floors accepted for this C++23 tree. The minimum
-# versions are documented in README.md ("Compiling Monero from source",
-# "Dependencies"); every rejection below points there instead of restating the
-# full requirements.
+# Enforce the compiler-family floors accepted for this C++23 tree. README.md
+# mirrors the floors in prose, while docs/COMPILING_DEBUGGING_TESTING.md
+# ("Toolchain requirements") carries the authoritative compatibility matrix
+# and evidence status. Every rejection below points there instead of restating it.
 #
 # The guard checks compiler family, frontend variant and version; it does not
 # probe the standard library. A standard-library pairing defect (for example
@@ -150,24 +150,24 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # MinGW-w64 GCC also reports "GNU", so this branch carries the Windows floor.
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0)
-    message(FATAL_ERROR "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old; GCC 13 or newer is required for C++23 (see README.md, Dependencies)")
+    message(FATAL_ERROR "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old; GCC 13 or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   # The frontend variant is tested before the version floor so that a clang-cl
   # of any version is rejected with the reason that actually applies to it.
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} with the MSVC frontend variant (clang-cl) is unsupported: this repository has no clang-cl build path, as Windows is built with MinGW-w64 GCC through MSYS2 UCRT64. Use GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 or newer (see README.md, Dependencies)")
+    message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} with the MSVC frontend variant (clang-cl) is unsupported: this repository has no clang-cl build path, as Windows is built with MinGW-w64 GCC through MSYS2 UCRT64. Use GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 or newer (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
   elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16.0)
-    message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Clang 16 or newer is required for C++23 (see README.md, Dependencies)")
+    message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Clang 16 or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
   # Apple Clang 15 ships with Xcode 15 and is based on LLVM 16, which makes it
   # the Apple equivalent of the Clang floor.
   if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15.0)
-    message(FATAL_ERROR "Apple Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Apple Clang 15 (Xcode 15) or newer is required for C++23 (see README.md, Dependencies)")
+    message(FATAL_ERROR "Apple Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Apple Clang 15 (Xcode 15) or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
   endif()
 else()
-  message(FATAL_ERROR "Unsupported C++ compiler '${CMAKE_CXX_COMPILER_ID}' (version ${CMAKE_CXX_COMPILER_VERSION}); this repository is built as C++23 and requires GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 (Xcode 15) or newer (see README.md, Dependencies)")
+  message(FATAL_ERROR "Unsupported C++ compiler '${CMAKE_CXX_COMPILER_ID}' (version ${CMAKE_CXX_COMPILER_VERSION}); this repository is built as C++23 and requires GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 (Xcode 15) or newer (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
 endif()
 
 function (add_c_flag_if_supported flag var)
@@ -709,7 +709,6 @@ endif()
 # Trezor support check
 include(CheckTrezor)
 
-  include(TestCXXAcceptsFlag)
   message(STATUS "Building on ${CMAKE_SYSTEM_PROCESSOR} for ${ARCH}")
   if(ARCH STREQUAL "default")
     set(ARCH_FLAG "")
@@ -760,7 +759,7 @@ include(CheckTrezor)
   elseif(ARM7)
     message(STATUS "AES support not available on ARMv7")
   elseif(ARM8)
-    CHECK_CXX_ACCEPTS_FLAG("-march=${ARCH}+crypto" ARCH_PLUS_CRYPTO)
+    check_cxx_compiler_flag("-march=${ARCH}+crypto" ARCH_PLUS_CRYPTO)
     if(ARCH_PLUS_CRYPTO)
       message(STATUS "Crypto extensions enabled for ARMv8")
       set(ARCH_FLAG "-march=${ARCH}+crypto")

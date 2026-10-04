@@ -97,9 +97,8 @@ namespace
    *
    * Fingerprint vectors are ordered lexicographically by byte. The constructor's sort
    * and has_fingerprint's binary search must share this comparator; spelling it
-   * explicitly preserves the prior order (identical to vector::operator<) and avoids
-   * instantiating the C++20 vector three-way comparison path, which GCC 14 at -O3
-   * misreports as -Wstringop-overread.
+   * explicitly preserves the prior order and avoids instantiating the C++23 vector
+   * three-way comparison path.
    */
   bool fingerprint_less(const std::vector<std::uint8_t>& a, const std::vector<std::uint8_t>& b)
   {

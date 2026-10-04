@@ -75,7 +75,7 @@ struct JSON_ERROR : public std::exception
   public:
     virtual ~JSON_ERROR() { }
 
-    const char* what() const throw()
+    const char* what() const noexcept
     {
       return m.c_str();
     }
