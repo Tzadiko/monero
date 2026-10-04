@@ -253,14 +253,14 @@ jobs:
                 --hash=sha256:3d31298449090ab8d47b7b1b2a555ff73cac7ed438a08b7ac160980c7ebed649 \
                 --hash=sha256:1c50fe28bbc2ced33386f298650d91218076c05420e6cbd790b913adc41659e7 \
                 --hash=sha256:b6b751274acb69d77b3323d6b7dbaa3c7fdfc1eb829b7eb61d262f32e1af9685
-            deepdiff==6.7.1 \
-                --hash=sha256:58396bb7a863cbb4ed5193f548c56f18218060362311aa1dc36397b2f25108bd
+            deepdiff==8.6.2 \
+                --hash=sha256:4d22034a866c3928303a9332c279362f714192d9305bac17c498720d095fd1b4
             idna==3.20 \
                 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
             monotonic==1.6 \
                 --hash=sha256:68687e19a14f11f26d140dd5c86f3dba4bf5df58003000ed467e0e2a69bca96c
-            ordered-set==4.1.0 \
-                --hash=sha256:046e1132c71fcf3330438a539928932caf51ddbc582496833e23de611de14562
+            orderly-set==5.5.0 \
+                --hash=sha256:46f0b801948e98f427b412fcabb831677194c05c3b699b80de260374baa0b1e7
             psutil==7.2.2 \
                 --hash=sha256:076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9
             pyzmq==25.1.2 \

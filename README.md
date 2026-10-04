@@ -151,7 +151,7 @@ The following table summarizes the tools and libraries required to build. Requir
 | libsodium   | ?                                                                                  | NO       | `libsodium-dev`     | `libsodium`  | `libsodium-devel` | `libsodium-devel`   | NO       | cryptography                                                   |
 | libunwind   | any                                                                                | NO       | `libunwind-dev`     | `libunwind`  | `libunwind-devel` | `libunwind-devel`   | YES      | Stack traces                                                   |
 | libreadline | 6.3.0                                                                              | NO       | `libreadline-dev`   | `readline`   | `readline-devel`  | `readline-devel`    | YES      | Input editing                                                  |
-| GTest       | 1.5                                                                                | YES      | `libgtest-dev`      | `gtest`      | `gtest-devel`     | `gtest-devel`       | YES      | Test suite                                                     |
+| GTest       | 1.5                                                                                | YES      | `libgtest-dev`      | `gtest`      | `gtest-devel`     | `gtest-devel`       | YES      | Test suite (built from `external/gtest`, not a package)        |
 | ccache      | any                                                                                | NO       | `ccache`            | `ccache`     | `ccache`          | `ccache`            | YES      | Compil. cache                                                  |
 | Doxygen     | any                                                                                | NO       | `doxygen`           | `doxygen`    | `doxygen`         | `doxygen`           | YES      | Documentation                                                  |
 | Graphviz    | any                                                                                | NO       | `graphviz`          | `graphviz`   | `graphviz`        | `graphviz`          | YES      | Documentation                                                  |
@@ -173,11 +173,11 @@ Clang 19 as the secondary compiler. The verified standard-library pairings
 are GCC with libstdc++ 13 or 14, Clang 16 with libstdc++ 13, and
 Clang 18 or 19 with libstdc++ 14 (Boost 1.84 or newer for a warning-clean
 build). Clang 16 with libstdc++ 14 does not compile the tree, and Clang with
-libc++ is not a verified pairing. The pairing matrix and the evidence behind
-each pairing are in the
-["Toolchain requirements"](docs/COMPILING_DEBUGGING_TESTING.md#toolchain-requirements)
-section of
-[docs/COMPILING_DEBUGGING_TESTING.md](docs/COMPILING_DEBUGGING_TESTING.md).
+libc++ is not a verified pairing. The pairing matrix and its evidence are in
+the ["Toolchain requirements"](docs/COMPILING_DEBUGGING_TESTING.md#toolchain-requirements)
+section of [docs/COMPILING_DEBUGGING_TESTING.md](docs/COMPILING_DEBUGGING_TESTING.md);
+Clang 19 with libstdc++ 14, verified by the C++23 acceptance builds, is not
+yet a row of that matrix.
 
 Install all dependencies at once on Debian/Ubuntu:
 
