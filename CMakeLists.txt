@@ -129,7 +129,7 @@ endif()
 
 enable_language(C ASM)
 
-# Require C11/C++23 and disable extensions for all targets
+# First-party targets use strict C11/C++23; external targets may override these defaults.
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -843,7 +843,7 @@ include(CheckTrezor)
     # Windows binaries die on startup with PIE when compiled with GCC <9.x
     # Windows dynamically-linked binaries die on startup with PIE regardless of GCC version
     if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      # Clang does not support -pie flag
+      # Clang: request PIE from the linker directly (-Wl,-pie); kept only if the linker-flag probe accepts it
       add_linker_flag_if_supported("-Wl,-pie" LD_SECURITY_FLAGS)
     else()
       add_linker_flag_if_supported("-pie" LD_SECURITY_FLAGS)

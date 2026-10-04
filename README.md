@@ -135,29 +135,29 @@ Approximately three months prior to a scheduled software upgrade, a branch from 
 
 ### Dependencies
 
-The following table summarizes the tools and libraries required to build. A few of the libraries are also included in this repository (marked as "Vendored"). By default, the build uses the library installed on the system and ignores the vendored sources. However, if no library is found installed on the system, then the vendored source will be built and used. The vendored sources are also used for statically-linked builds because distribution packages often include only shared library binaries (`.so`) but not static library archives (`.a`).
+The following table summarizes the tools and libraries required to build. Required libraries must be installed on the system or supplied by the prefix that the `depends` system builds; the build never compiles a missing required library from bundled sources, and configure stops with an error instead. GTest, the only entry marked YES under "Vendored", is always built from the `external/gtest` submodule when tests are built (`BUILD_TESTS=ON`), and an installed GTest package is not used. Statically-linked builds need static library archives (`.a`) of the dependencies, which distribution packages often omit, shipping only shared library binaries (`.so`); the `depends` system builds them.
 
-| Dep          | Min. version        | Vendored | Debian/Ubuntu pkg    | Arch pkg     | Void pkg           | Fedora pkg          | Optional | Purpose                         |
-| ------------ | ------------------- | -------- | -------------------- | ------------ | ------------------ | ------------------- | -------- | ------------------------------- |
-| GCC          | 13                  | NO       | `build-essential`    | `base-devel` | `base-devel`       | `gcc`               | NO       |                                 |
-| Clang        | 16 (Apple Clang 15) | NO       | `clang`              | `clang`      | `clang`            | `clang`             | YES      | Alternative C++ compiler to GCC |
-| CMake        | 3.20                | NO       | `cmake`              | `cmake`      | `cmake`            | `cmake`             | NO       |                                 |
-| pkg-config   | any                 | NO       | `pkg-config`         | `base-devel` | `base-devel`       | `pkgconf`           | NO       |                                 |
-| Boost        | 1.69                | NO       | `libboost-all-dev`   | `boost`      | `boost-devel`      | `boost-devel`       | NO       | C++ libraries                   |
-| OpenSSL      | 1.1.1               | NO       | `libssl-dev`         | `openssl`    | `openssl-devel`    | `openssl-devel`     | NO       | cryptography                    |
-| libzmq       | 4.2.0               | NO       | `libzmq3-dev`        | `zeromq`     | `zeromq-devel`     | `zeromq-devel`      | NO       | ZeroMQ library                  |
-| libunbound   | 1.4.16              | NO       | `libunbound-dev`     | `unbound`    | `unbound-devel`    | `unbound-devel`     | NO       | DNS resolver                    |
-| libsodium    | ?                   | NO       | `libsodium-dev`      | `libsodium`  | `libsodium-devel`  | `libsodium-devel`   | NO       | cryptography                    |
-| libunwind    | any                 | NO       | `libunwind-dev`      | `libunwind`  | `libunwind-devel`  | `libunwind-devel`   | YES      | Stack traces                    |
-| libreadline  | 6.3.0               | NO       | `libreadline-dev`    | `readline`   | `readline-devel`   | `readline-devel`    | YES      | Input editing                   |
-| GTest        | 1.5                 | YES      | `libgtest-dev`       | `gtest`      | `gtest-devel`      | `gtest-devel`       | YES      | Test suite                      |
-| ccache       | any                 | NO       | `ccache`             | `ccache`     | `ccache`           | `ccache`            | YES      | Compil. cache                   |
-| Doxygen      | any                 | NO       | `doxygen`            | `doxygen`    | `doxygen`          | `doxygen`           | YES      | Documentation                   |
-| Graphviz     | any                 | NO       | `graphviz`           | `graphviz`   | `graphviz`         | `graphviz`          | YES      | Documentation                   |
-| libhidapi    | ?                   | NO       | `libhidapi-dev`      | `hidapi`     | `hidapi-devel`     | `hidapi-devel`      | YES      | Hardware wallet                 |
-| libusb       | ?                   | NO       | `libusb-1.0-0-dev`   | `libusb`     | `libusb-devel`     | `libusb1-devel`     | YES      | Hardware wallet                 |
-| libprotobuf  | ?                   | NO       | `libprotobuf-dev`    | `protobuf`   | `protobuf-devel`   | `protobuf-devel`    | YES      | Hardware wallet                 |
-| protoc       | ?                   | NO       | `protobuf-compiler`  | `protobuf`   | `protobuf`         | `protobuf-compiler` | YES      | Hardware wallet                 |
+| Dep          | Min. version        | Vendored | Debian/Ubuntu pkg    | Arch pkg     | Void pkg           | Fedora pkg           | Optional | Purpose                         |
+| ------------ | ------------------- | -------- | -------------------- | ------------ | ------------------ | -------------------- | -------- | ------------------------------- |
+| GCC          | 13                  | NO       | `build-essential`    | `base-devel` | `base-devel`       | `gcc-c++`            | NO       |                                 |
+| Clang        | 16 (Apple Clang 15) | NO       | `clang`              | `clang`      | `clang`            | `clang`              | YES      | Alternative C++ compiler to GCC |
+| CMake        | 3.20                | NO       | `cmake`              | `cmake`      | `cmake`            | `cmake`              | NO       |                                 |
+| pkg-config   | any                 | NO       | `pkg-config`         | `base-devel` | `base-devel`       | `pkgconf-pkg-config` | NO       |                                 |
+| Boost        | 1.69                | NO       | `libboost-all-dev`   | `boost`      | `boost-devel`      | `boost-devel`        | NO       | C++ libraries                   |
+| OpenSSL      | 1.1.1               | NO       | `libssl-dev`         | `openssl`    | `openssl-devel`    | `openssl-devel`      | NO       | cryptography                    |
+| libzmq       | 4.2.0               | NO       | `libzmq3-dev`        | `zeromq`     | `zeromq-devel`     | `zeromq-devel`       | NO       | ZeroMQ library                  |
+| libunbound   | 1.4.16              | NO       | `libunbound-dev`     | `unbound`    | `unbound-devel`    | `unbound-devel`      | NO       | DNS resolver                    |
+| libsodium    | ?                   | NO       | `libsodium-dev`      | `libsodium`  | `libsodium-devel`  | `libsodium-devel`    | NO       | cryptography                    |
+| libunwind    | any                 | NO       | `libunwind-dev`      | `libunwind`  | `libunwind-devel`  | `libunwind-devel`    | YES      | Stack traces                    |
+| libreadline  | 6.3.0               | NO       | `libreadline-dev`    | `readline`   | `readline-devel`   | `readline-devel`     | YES      | Input editing                   |
+| GTest        | 1.5                 | YES      | `libgtest-dev`       | `gtest`      | `gtest-devel`      | `gtest-devel`        | YES      | Test suite                      |
+| ccache       | any                 | NO       | `ccache`             | `ccache`     | `ccache`           | `ccache`             | YES      | Compil. cache                   |
+| Doxygen      | any                 | NO       | `doxygen`            | `doxygen`    | `doxygen`          | `doxygen`            | YES      | Documentation                   |
+| Graphviz     | any                 | NO       | `graphviz`           | `graphviz`   | `graphviz`         | `graphviz`           | YES      | Documentation                   |
+| libhidapi    | ?                   | NO       | `libhidapi-dev`      | `hidapi`     | `hidapi-devel`     | `hidapi-devel`       | YES      | Hardware wallet                 |
+| libusb       | ?                   | NO       | `libusb-1.0-0-dev`   | `libusb`     | `libusb-devel`     | `libusb1-devel`      | YES      | Hardware wallet                 |
+| libprotobuf  | ?                   | NO       | `libprotobuf-dev`    | `protobuf`   | `protobuf-devel`   | `protobuf-devel`     | YES      | Hardware wallet                 |
+| protoc       | ?                   | NO       | `protobuf-compiler`  | `protobuf`   | `protobuf`         | `protobuf-compiler`  | YES      | Hardware wallet                 |
 
 Monero is compiled as C++23. The configure step enforces the minimum
 toolchain versions and stops with an error below them: GCC 13, Clang 16,

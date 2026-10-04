@@ -2,31 +2,32 @@
 
 ## 1.1 Project Overview
 
-Monero's first-party build (`src/`, `contrib/epee/`, `tests/`) moves from C++17 to C++23: `CMAKE_CXX_STANDARD 23` with `CMAKE_CXX_STANDARD_REQUIRED ON` and `CMAKE_CXX_EXTENSIONS OFF`, a CMake 3.20 minimum, GCC 14.2 as the primary and Clang 19 as the secondary compiler. Configure enforces the compiler floors, every construct C++23 rejects or deprecates is fixed at its call site, and the CI images, the `contrib/depends` cross builds and the Guix release toolchain move to GCC 14.2. Consensus, wire, on-disk and RPC behaviour were shown identical against the same commit built as C++17, except the certificate-pin lookup, whose behaviour check is still pending (Section 3.5). Section 5.3 is a runbook for confirming the Windows build. The audience is the maintainers and packagers who release the daemon, wallets and RPC servers.
+Monero's first-party build (`src/`, `contrib/epee/`, `tests/`) moves from C++17 to C++23: `CMAKE_CXX_STANDARD 23` with `CMAKE_CXX_STANDARD_REQUIRED ON` and `CMAKE_CXX_EXTENSIONS OFF`, a CMake 3.20 minimum, GCC 14.2 as the primary and Clang 19 as the secondary compiler. Configure enforces the compiler floors, every construct C++23 rejects or deprecates is fixed at its call site, and the CI images, the `contrib/depends` cross builds and the Guix release toolchain move to GCC 14.2. Measured on `ad0dbd181`, consensus, wire, on-disk and RPC behaviour were shown identical against the same commit built as C++17, except the certificate-pin lookup, whose behaviour check is still pending (Section 3.5); acceptance of the final revision is pending (Section 3). Section 5.3 is a runbook for confirming the Windows build. The audience is the maintainers and packagers who release the daemon, wallets and RPC servers.
 
 ## 1.2 Completion Status
 
 ```mermaid
-pie title Project Completion — 81.7% Complete
+%%{init: {"theme": "base", "themeVariables": {"pie1": "#5B39F3", "pie2": "#FFFFFF", "pieOpacity": "1", "pieStrokeColor": "#5B39F3", "pieOuterStrokeColor": "#5B39F3", "pieSectionTextColor": "#000000"}}}%%
+pie title Project Completion — 79.0% Complete
     "Completed Work" : 147
-    "Remaining Work" : 33
+    "Remaining Work" : 39
 ```
 
 Colour key: Completed = Dark Blue `#5B39F3` · Remaining = White `#FFFFFF`.
 
 | Metric | Value |
 |---|---|
-| Total Hours | 180 |
+| Total Hours | 186 |
 | Completed Hours (AI + Manual) | 147 |
-| Remaining Hours | 33 |
-| Percent Complete | 81.7% |
+| Remaining Hours | 39 |
+| Percent Complete | 79.0% |
 
-Calculation: 147 / (147 + 33) = **81.7%**.
+Calculation: 147 / (147 + 39) = **79.0%**.
 
 ## 1.3 Key Accomplishments
 
 - ✅ Every first-party C++ translation unit compiles as C++23: all 272 first-party C++ compile-database entries (132 under `src/`, 112 under `tests/`, 28 under `contrib/epee/`) carry `-std=c++23`; vendored C++11 and C11 units are untouched
-- ✅ Configurations A-E build with zero errors on GCC 14.2 and Clang 19, Release and Debug; A and E (GCC) show **zero new census keys** against their C++17 twins, while the zero-new-key results of B, C, D and E (Clang) are unverified until their census is recomputed with the corrected script (Section 3.3). A is accepted; C awaits that recomputation, E (GCC) its twin compile-database confirmation (Section 3.2), and B, D and E (Clang) both
+- ✅ Configurations A-E build with zero errors on GCC 14.2 and Clang 19, Release and Debug; A and E (GCC) show **zero new census keys** against their C++17 twins, while the zero-new-key results of B, C, D and E (Clang) are unverified until their census is recomputed with the corrected script (Section 3.3). A is accepted for `ad0dbd181`; C awaits that recomputation, E (GCC) its twin compile-database confirmation (Section 3.2), and B, D and E (Clang) both
 - ✅ CMake 3.20.6 configures the tree with no policy warning; the link-test project now compiles at the root standard
 - ✅ Configure refuses under-floor GCC, Clang and Apple Clang, `clang-cl` and unknown compilers; GCC 12.4.0 is refused, GCC 13.3.0 and Clang 16.0.6 accepted
 - ✅ Test parity on both compilers: 22 of 22 CTest entries, 1309 unit-test identifiers, 19 live RPC scenarios and 165 of 165 consensus scenarios behave identically at both standards; the `REPORT:` and `Done,` log cross-checks are pending (Section 3.4)
@@ -34,14 +35,16 @@ Calculation: 147 / (147 + 33) = **81.7%**.
 - ✅ depends CI on `debian:13` and Guix on a `gcc-14.2` variant give GCC 14.2.0 as native and target compiler; system Linux CI selects `gcc-14`
 - ✅ The `depends.yml` `Win64` job, reproduced in `debian:13` with Debian's MinGW-w64 GCC 14 (posix), builds all 13 Windows executables, including the fixed `isFat32` diagnostic, with zero errors
 
+Every result above was measured on `ad0dbd181`; acceptance for the final revision, which adds three build-script fixes, the CI workflow supply-chain hardening, three CMake comment corrections and the README build-requirements corrections, is pending (Section 3; human-finish item 9 (g)).
+
 ## 1.4 Critical Unresolved Issues
 
 | Issue | Impact | Owner | ETA |
 |---|---|---|---|
 | **Open acceptance blocker: protobuf 21.12 in the depends package builds.** Compiled at C++23 by its unmodified recipe, it adds 35 GCC `-Wdeprecated-enum-enum-conversion` keys (105 instances) in `google/protobuf/generated_message_tctable_impl.h`. Every remedy needs an authorization the request does not give (Section 5.2) | Criterion 3 is **not met for the depends package builds** (depends, Guix, Docker). Monero's own builds on those paths add nothing | Repository owner | Owner decision |
-| **Five acceptance checks are pending** (human-finish item 9): the certificate-pin lookup check the plan names, `ssl_handshake_fingerprint_lookup`, is not in the tree and no other test supplies a non-empty pin list; the B, D and E twins lack their compile-database confirmation; the depends twins share `native_protobuf`'s archive ID and must be rebuilt with distinct `BUILD_ID_SALT` values; the libc++ pass skipped three C++ entries; the `REPORT:` and `Done,` parity cross-checks were not run. The census of B, C, D, E (Clang) and the depends package builds must also be recomputed with the corrected census script (Section 3.3) | The affected results stand as measured but are not accepted; certificate pinning on SSL RPC and P2P links has no behaviour evidence at either standard | QA / repository owner | Before merge |
+| **Six acceptance checks are pending** (human-finish item 9): every result was measured on `ad0dbd181`, and the acceptance run has not been repeated on the final revision; the certificate-pin lookup check the plan names, `ssl_handshake_fingerprint_lookup`, is not in the tree and no other test supplies a non-empty pin list; the B, D and E twins lack their compile-database confirmation; the depends twins share `native_protobuf`'s archive ID and must be rebuilt with distinct `BUILD_ID_SALT` values; the libc++ pass skipped three C++ entries; the `REPORT:` and `Done,` parity cross-checks were not run. The census of B, C, D, E (Clang) and the depends package builds must also be recomputed with the corrected census script (Section 3.3) | The affected results stand as measured but are not accepted, and final-candidate acceptance is pending; certificate pinning on SSL RPC and P2P links has no behaviour evidence at either standard | QA / repository owner | Before merge |
 | **Open acceptance blocker: the depends verifier's C-recipe item.** The plan requires every C recipe's compile lines to carry `-std=c11`, but with the recipes unchanged `openssl`, `hidapi` and ncurses' two helpers cannot (Section 5.2, blocker 3) | No rebuild clears it, so the depends twins cannot be accepted; Monero's own builds are unaffected | Repository owner | Owner decision |
-| CI has not run on the candidate: no GitHub Actions, Windows, macOS or Guix host is reachable | The `_WIN32`, `__APPLE__`, FreeBSD and Android paths, and the rolling toolchains, are unconfirmed | Repository owner | 1 day after push |
+| CI has not run on the candidate: no GitHub Actions, Windows, macOS or Guix host is reachable | Native Windows (MSYS2) builds, tests and runtime, the `__APPLE__`, FreeBSD and Android paths, and the rolling toolchains are unconfirmed. Locally, only the Debian 13 MinGW-w64 cross build compiled the `_WIN32` code of the 13 Windows executables; it built no tests and ran nothing (Section 5.3.9) | Repository owner | 1 day after push |
 | The Guix jobs must build GCC 14.2.0 from source, because no substitutes exist for the variant | A `build-guix` job may exceed the runner's time limit | Release engineer | First Guix run |
 | The Windows-only log line at `src/daemon/main.cpp:119` keeps the C++17 output, a pointer value; the user's earlier UTF-8 version was reverted | Behaviour is unchanged from C++17; logging the path as text needs the owner's decision | Platform maintainer | Owner decision |
 
@@ -61,7 +64,7 @@ Building, testing and running need no credentials, secrets or network services.
 ## 1.6 Recommended Next Steps
 
 1. **[High]** Push the change set and confirm every job of `build.yml`, `depends.yml` and `guix.yml` on that commit (Section 3.6; runbook for Windows: Section 5.3).
-2. **[High]** Run the five pending acceptance checks (Section 8, item 9): the certificate-pin lookup, the B, D and E compile-database confirmations, the depends twins rebuilt with distinct `BUILD_ID_SALT` values, the libc++ pass over all 299 C++ entries, and the `REPORT:`/`Done,` parity cross-checks; and recompute the census of B, C, D, E (Clang) and the depends package builds with the corrected script (Section 3.3).
+2. **[High]** Repeat the acceptance run on the final revision and run the five other pending checks there (Section 8, item 9): the certificate-pin lookup, the B, D and E compile-database confirmations, the depends twins rebuilt with distinct `BUILD_ID_SALT` values, the libc++ pass over all 299 C++ entries, and the `REPORT:`/`Done,` parity cross-checks; and recompute the census of B, C, D, E (Clang) and the depends package builds with the corrected script (Section 3.3).
 3. **[High]** Decide on protobuf 21.12's C++23 warnings in the depends package builds and on the depends verifier's C-recipe item (Section 5.2, blockers 1 and 3), then re-run the depends check.
 4. **[Medium]** Watch the first Guix run's build time for the `gcc-14.2` variant.
 5. **[Medium]** Decide whether the Windows FAT32 log line should print the path as UTF-8, and confirm it on MSYS2.
@@ -88,7 +91,7 @@ The complete list is in Section 8, "Human-finish items".
 | Guix `gcc-14.2` variant | 6 | Package variant of the channel's `gcc-14`, its base32 hash derivation and patch dry run; `gcc-toolchain-14.2` for every native toolchain; `base-gcc` for the Linux and MinGW cross toolchains |
 | README alignment | 2 | GCC 13, Clang 16 (Apple Clang 15), CMake 3.20 rows; enforced minimums and the GCC 14.2 / Clang 19 reference compilers in prose |
 | Acceptance environment | 6 | Pinned apt set, checksummed rustup-init and CMake 3.20.6, pinned Python venv, pinned Boost 1.91.0-1 prefix, depends shim, `tools.txt` and `versions.txt` checks |
-| Build matrix A-F with C++17 twins and census | 16 | Ten twin builds (A-E) and four F configures, the census tool and its per-pair diffs, the compile-database comparison for A and C |
+| Build matrix A-F with C++17 twins and census | 16 | Twelve twin builds (six pairs, A-E) and four F configures, the census tool and its per-pair diffs, the compile-database comparison for A and C |
 | depends twins | 8 | Fresh per-standard package builds with host-salted IDs, the C++ and Boost dialect checks, the package census, and Monero built through each twin's toolchain |
 | Test parity | 10 | The non-consensus tier on A and C twins with retained output, the per-case comparison, and reduced-iteration `core_tests` on GCC and Clang twins |
 | Contract checks and build-file checks | 2 | `wallet2_api.h` and LMDB diffs, the contract suites, both build-file searches with positive controls |
@@ -106,19 +109,19 @@ The complete list is in Section 8, "Human-finish items".
 |---|---|---|
 | Push the change set and check every workflow on that commit: all `build.yml` jobs, the ten `depends.yml` hosts, `guix.yml` with its eight targets and `bundle-logs`, and the push-event full-iteration `core_tests` (human-finish item 1) | 8 | High |
 | Decide on protobuf 21.12's C++23 warnings in the depends package builds, then re-run the depends twins with distinct `BUILD_ID_SALT` values (item 2) | 4 | High |
-| Run the five pending acceptance checks: the certificate-pin lookup in both twins of A and C (3), the B, D and E compile-database confirmations (2), the depends twins rebuilt with distinct `BUILD_ID_SALT` values and re-censused (3), the libc++ pass over all 299 C++ entries (1), and the `REPORT:`/`Done,` parity cross-checks (1); and recompute the census of B, C, D, E (Clang) and the depends package builds from the retained logs (0) (item 9) | 10 | High |
+| Run the six pending acceptance checks: the acceptance run repeated on the final revision (6), the certificate-pin lookup in both twins of A and C (3), the B, D and E compile-database confirmations (2), the depends twins rebuilt with distinct `BUILD_ID_SALT` values and re-censused (3), the libc++ pass over all 299 C++ entries (1), and the `REPORT:`/`Done,` parity cross-checks (1); and recompute the census of B, C, D, E (Clang) and the depends package builds from the retained logs (0) (item 9) | 16 | High |
 | Decide on the depends verifier's C-recipe item, open acceptance blocker 3 (item 10) | 1 | High |
 | Watch the Guix build time for the `gcc-14.2` variant; reproduce a timed-out job on a self-hosted Guix machine (item 4) | 4 | Medium |
 | Confirm the Windows build and the `isFat32` log line on MSYS2 UCRT64, including its error branch, and decide whether it should print the path as text (item 6) | 3 | Medium |
 | Decide on StageX GCC 15.2.0 in the `Dockerfile` and Android NDK r27c Clang 18.0.1 (item 7) | 2 | Low |
 | Decide on the Clang 19 + system Boost 1.83 pairing (item 8) | 1 | Low |
-| **Total** | **33** | |
+| **Total** | **39** | |
 
 Every row is a human-finish item from Section 8; items 3 and 5 carry no hours, because no frozen-directory regression was found and the two files item 5 names need no refresh. Item 9's census recomputation only re-reads the retained `<run>/logs` build logs with the corrected script (no rebuild). Confidence is high on the completed rows, all of which have evidence in Sections 3 and 4, and medium on the remaining rows, which depend on CI, on owner decisions and on the pending acceptance checks.
 
 # 3. Test Results and Acceptance Evidence
 
-Every figure in this section comes from this execution's own acceptance run, which measured commit `ad0dbd181`. The final tree is `ad0dbd181` plus three fixes of pre-existing build-script defects found in review, in `CMakeLists.txt`, `cmake/CheckTrezor.cmake` and `contrib/guix/manifest.scm` (Section 5.4.4), and this guide. The figures hold for it unchanged: the fixes touch no C or C++ source, and both trees, configured with the acceptance options, give identical `compile_commands.json` files under the Section 3.2 comparison (configuration A 407/407 entries, E 453/453, 0 differences). Only the generated version tag, which carries the commit ID, differs. Each figure names its log, census or result file under `<run>`, the acceptance work directory on the execution host. `<run>` lies outside the repository and is not committed; every file in it is reproduced by the commands given here and in Appendix A. Results reported by the earlier pass at `8fe8e4965` are superseded and not repeated. A check this execution did not record is marked **pending** where it is described, and listed in human-finish item 9; the result it qualifies stands as measured but is not accepted until the check passes.
+Every figure in this section comes from this execution's own acceptance run, which measured commit `ad0dbd181`. The final tree is `ad0dbd181` plus changes that answer review findings: three fixes of pre-existing build-script defects, in `CMakeLists.txt`, `cmake/CheckTrezor.cmake` and `contrib/guix/manifest.scm`; the CI workflow supply-chain hardening of `.github/workflows/build.yml` and `depends.yml`; three comment corrections, at `CMakeLists.txt:132` and `:846` and `cmake/CheckTrezor.cmake:209`; the README build-requirements corrections at `README.md:138`, `:142` and `:145` (all Section 5.4.4); and this guide. No acceptance run was made on the final revision, so every figure here is a measurement of `ad0dbd181`: it stands as measured but is not accepted for the final revision, whose acceptance is **pending** (human-finish item 9 (g)). While this guide was revised, the final tree, every change above included, and an `ad0dbd181` copy were configured with the options of A and of E, configure only, and compared with the Section 3.2 script, the final tree as `CAND_*` and the copy as `BASE_*`: configuration A 407/407 entries, E 453/453, 0 differences, and both E logs print "Trezor: support enabled"; the generated version tag, which carries the commit ID, differs by construction. That comparison kept no output in `<run>`; rerunning the script reproduces it. It is not acceptance evidence: it covers no build, test or runtime run, and of the configure code the fixes change it reaches only the paths a successful A or E configure takes; the failure branches of the Trezor mandatory gate and of `check_submodule()`, and the IOS include, are not reached. The fixes touch no C or C++ source; the comment corrections change only CMake comment lines; the hardening changes only the two workflow files and the README corrections only `README.md`, none of which is an input of the local acceptance builds (the Section 3.3 build-file search over `.github/workflows` still prints nothing). Each figure names its log, census or result file under `<run>`, the acceptance work directory on the execution host. `<run>` lies outside the repository and is not committed; every file in it is reproduced by the commands given here and in Appendix A. Results reported by the earlier pass at `8fe8e4965` are superseded and not repeated. A check this execution did not record is marked **pending** where it is described, and listed in human-finish item 9; the result it qualifies stands as measured but is not accepted until the check passes.
 
 | Area / Category | Framework | Tests | Passed | Failed | Coverage | What This Proves |
 |---|---|---|---|---|---|---|
@@ -127,7 +130,7 @@ Every figure in this section comes from this execution's own acceptance run, whi
 | Live RPC scenarios | `functional_tests_rpc` | 19 × 4 runs | 19 in every run | 0 | Real `monerod` and `monero-wallet-rpc` on a deterministic chain; `<run>/runs/*/ctest-full.log`; the `Done,` cross-check and section scoping are pending (Section 3.4) | Daemon and wallet RPC behave identically at both standards |
 | RPC method coverage | `check_missing_rpc_methods` | 1 × 4 runs | 4 | 0 | CTest status | Every RPC method is still exercised |
 | Consensus regression | `core_tests` (reduced iterations) | 165 × 4 runs | 165 in every run | 0 | Every registered synthetic-blockchain scenario, GCC and Clang twins, `MONERO_CRYPTO_SLOW_HASH_ITER=20`; `<run>/runs/{cand,base}-core-{gcc,clang}/core-full.log`; the `REPORT:` cross-check is pending (Section 3.4) | Block and transaction validation behave identically at both standards |
-| Build matrix A-E with C++17 twins | Ninja + census | 6 pairs (A, B, C, D, E on GCC, E on Clang) | 6 | 0 | Zero errors in every pair; zero new census keys in A and E (GCC); the census of B, C, D and E (Clang) is unverified, pending recomputation (Section 3.3); the twin compile-database confirmation is recorded for A and C, and pending for B, D and both E pairs (Section 3.2) | Criterion 2, and criterion 3 for Monero's own builds: accepted for A, pending for B, C, D and E |
+| Build matrix A-E with C++17 twins | Ninja + census | 6 pairs (A, B, C, D, E on GCC, E on Clang) | 6 | 0 | Zero errors in every pair; zero new census keys in A and E (GCC); the census of B, C, D and E (Clang) is unverified, pending recomputation (Section 3.3); the twin compile-database confirmation is recorded for A and C, and pending for B, D and both E pairs (Section 3.2) | Criterion 2, and criterion 3 for Monero's own builds: accepted for A at `ad0dbd181`, pending for B, C, D and E; final revision pending |
 | depends package builds | Census | 11 packages × 2 twins | Built | — | 35 new keys in protobuf 21.12; whether any other package adds one is unverified, pending recomputation (Section 3.3); the twins share `native_protobuf`'s archive ID, so they are not accepted until rebuilt with distinct `BUILD_ID_SALT` values, and the verifier's C-recipe item cannot pass with the recipes unchanged (Section 3.3; Section 5.2, blocker 3) | Criterion 3 **not met** for the package builds: open blocker (Section 5.2) |
 
 ## 3.1 Acceptance environment
@@ -514,10 +517,11 @@ No GitHub Actions run exists for the candidate: the execution environment has no
 - **Reproducible release builds**: the Guix path has not been run.
 - **Sustained network load**: the load harnesses build in every configuration but were not run.
 - **Container image** (`Dockerfile`, StageX GCC 15.2.0): not built in this execution.
+- **The final revision**: every result in Sections 3 and 4 was measured on `ad0dbd181`; the acceptance run has not been repeated on the final revision, which adds three build-script fixes, the CI workflow supply-chain hardening, three CMake comment corrections and the README build-requirements corrections, so its acceptance is pending (human-finish item 9 (g)).
 
 # 4. Runtime Validation & UI Verification
 
-This project ships command-line executables (daemons, wallets, RPC servers and blockchain utilities) and has no user interface, so there is no UI to verify. Runtime validation drove the configuration A binaries of both twins inside the acceptance container: testnet in offline mode, loopback-only binds, digest credentials and throwaway data directories. Nothing touched mainnet.
+This project ships command-line executables (daemons, wallets, RPC servers and blockchain utilities) and has no user interface, so there is no UI to verify. Runtime validation drove the configuration A binaries of both twins inside the acceptance container: testnet in offline mode, loopback-only binds, digest credentials and throwaway data directories. Nothing touched mainnet. These runs used `ad0dbd181`; their repetition on the final revision is pending (human-finish item 9 (g)).
 
 - ✅ **Daemon start-up and HTTP JSON-RPC with digest authentication** (`<run>/runtime/smoke-cand-A.log`): `monerod --testnet --offline` with `--rpc-login` answered after 3 s. A request without credentials and one with a wrong password both got 401; digest credentials got 200. `get_info` returned `status OK`, height 1, `nettype testnet`, offline, version `0.18.1.0-ad0dbd181`.
 - ✅ **Daemon ZMQ JSON-RPC**: a plain JSON-RPC 2.0 object on the ZMQ endpoint answered `get_height` with `{"jsonrpc":"2.0","id":0,"result":{"rpc_version":131072,"height":1}}`, the unchanged ZMQ RPC version 2.0. The method table whose `u8` literals were edited dispatches unchanged.
@@ -538,18 +542,18 @@ Where to find each required record: compliance matrix (5.1); divergences and the
 
 | Deliverable | Benchmark | Status | Evidence |
 |---|---|---|---|
-| G1 Language standard | `CMAKE_CXX_STANDARD 23`, `REQUIRED ON`, `EXTENSIONS OFF` for every first-party target and the configure-time compiles; no `-std=c++17/14/11` in an in-scope build file | ✅ Pass | `CMakeLists.txt:136-138`; link-test forwarding `:299-301` with its probe; both build-file searches print nothing; every first-party compile-database entry carries `-std=c++23` (Section 3.3) |
-| G2 CMake minimum | `cmake_minimum_required` at 3.20 | ✅ Pass | `CMakeLists.txt:31`, `:279`; configuration F under CMake 3.20.6: exit 0, no policy line |
-| G3 Clean builds | All default targets on GCC 14.2 and Clang 19, Release and Debug, zero errors | ✅ Pass | A-E: 0 `: error:` lines; `ninja` exit 0 in every build (Section 3.3) |
-| G4 No new warnings | Zero new census keys of any origin against the C++17 twin | ⚠ Partial | 0 new keys in A and E (GCC). B, C, D and E (Clang) unverified until their census is recomputed with the corrected script (Section 3.3); acceptance of B, D and both E pairs also waits on the twin compile-database confirmation (Section 3.2). 0 new keys measured in the depends-built Monero pair, whose depends twins fail the all-archive check and await a rerun with distinct `BUILD_ID_SALT` values (Section 3.3) and the owner's decision on the verifier's C-recipe item (Section 5.2, blocker 3). **Not met** for the depends package builds: 35 protobuf keys, an open blocker (Section 5.2) |
-| G5 Test parity | Every case passing at C++17 passes at C++23 | ⚠ Pass, cross-checks pending | unit_tests, core_tests, crypto, hash and functional_tests identifiers on GCC and Clang twins: 0 regressions. The `core_tests` `REPORT:` and functional `Done,` cross-checks and the functional section scoping are pending (Section 3.4) |
-| G6 depends and Guix compiler | GCC 14.2 native and target in depends CI and in the Guix release | ✅ Pass (definition); CI run pending | `depends.yml:27-29` `debian:13`; `contrib/guix/manifest.scm:85-93`; the local depends checks used GCC 14.2.0 as native and target compiler: Ubuntu's `g++-14` for x86_64 Linux, Debian 13 for Win64 (Sections 3.3 and 5.3.9) |
+| G1 Language standard | `CMAKE_CXX_STANDARD 23`, `REQUIRED ON`, `EXTENSIONS OFF` for every first-party target and the configure-time compiles; no `-std=c++17/14/11` in an in-scope build file | ✅ Pass (definition); measured on `ad0dbd181`, final revision pending | `CMakeLists.txt:136-138`; link-test forwarding `:299-301` with its probe; both build-file searches print nothing; every first-party compile-database entry carries `-std=c++23` (Section 3.3) |
+| G2 CMake minimum | `cmake_minimum_required` at 3.20 | ✅ Pass (definition); measured on `ad0dbd181`, final revision pending | `CMakeLists.txt:31`, `:279`; configuration F under CMake 3.20.6: exit 0, no policy line |
+| G3 Clean builds | All default targets on GCC 14.2 and Clang 19, Release and Debug, zero errors | ⚠ Pass on `ad0dbd181`; final revision pending | A-E: 0 `: error:` lines; `ninja` exit 0 in every build (Section 3.3) |
+| G4 No new warnings | Zero new census keys of any origin against the C++17 twin | ⚠ Partial | 0 new keys in A and E (GCC). B, C, D and E (Clang) unverified until their census is recomputed with the corrected script (Section 3.3); acceptance of B, D and both E pairs also waits on the twin compile-database confirmation (Section 3.2). 0 new keys measured in the depends-built Monero pair, whose depends twins fail the all-archive check and await a rerun with distinct `BUILD_ID_SALT` values (Section 3.3) and the owner's decision on the verifier's C-recipe item (Section 5.2, blocker 3). **Not met** for the depends package builds: 35 protobuf keys, an open blocker (Section 5.2). Measured on `ad0dbd181`; final revision pending (human-finish item 9 (g)) |
+| G5 Test parity | Every case passing at C++17 passes at C++23 | ⚠ Pass, cross-checks pending | unit_tests, core_tests, crypto, hash and functional_tests identifiers on GCC and Clang twins: 0 regressions. The `core_tests` `REPORT:` and functional `Done,` cross-checks and the functional section scoping are pending (Section 3.4). Measured on `ad0dbd181`; final revision pending (human-finish item 9 (g)) |
+| G6 depends and Guix compiler | GCC 14.2 native and target in depends CI and in the Guix release | ✅ Pass (definition); CI run pending | `depends.yml:31-34` `debian:13`; `contrib/guix/manifest.scm:85-93`; the local depends checks used GCC 14.2.0 as native and target compiler: Ubuntu's `g++-14` for x86_64 Linux, Debian 13 for Win64 (Sections 3.3 and 5.3.9) |
 | G7 CI | Every existing build job compiles as C++23, with updated compiler versions | ⚠ Pending | Definitions updated (Section 5.4.5); no CI run yet (Section 3.6) |
 | G8 README | Minimum GCC, Clang and CMake versions | ✅ Pass | `README.md:142-144`, `:162-170` |
 | G9 Project Guide | Categories, files per category, vendored patches, human-finish items | ✅ Pass | Sections 5.4 and 8 |
-| Consensus, wire, on-disk and RPC behaviour unchanged | Contract suites, functional scenarios and interchange identical at both standards | ⚠ Partial | Consensus, on-disk and RPC suites, the functional scenarios and the interchange are identical at both standards (Sections 3.5 and 4). Wire formats: every named suite passes except the certificate-pin check `ssl_handshake_fingerprint_lookup`, which is not in the tree; the evidence that replaces it is pending (Section 3.5, human-finish item 9) |
+| Consensus, wire, on-disk and RPC behaviour unchanged | Contract suites, functional scenarios and interchange identical at both standards | ⚠ Partial | Consensus, on-disk and RPC suites, the functional scenarios and the interchange are identical at both standards (Sections 3.5 and 4). Wire formats: every named suite passes except the certificate-pin check `ssl_handshake_fingerprint_lookup`, which is not in the tree; the evidence that replaces it is pending (Section 3.5, human-finish item 9). Measured on `ad0dbd181`; final revision pending (human-finish item 9 (g)) |
 | `src/wallet/api/wallet2_api.h` | No signature change | ✅ Pass | Empty diff since `454075bc6` and since `861efbceb` |
-| No suppression, no dual-standard code, no C++23 feature adoption | No `#pragma`, `-Wno-*`, `-fpermissive` or `__cplusplus` guard added | ✅ Pass | `git diff 454075bc6 ad0dbd181` adds none, and neither do the three later build-script fixes (Section 5.4.4). This guide names them only as prohibitions, and `__cplusplus` also in the scratch probe of Section 3.3, which is never committed |
+| No suppression, no dual-standard code, no C++23 feature adoption | No `#pragma`, `-Wno-*`, `-fpermissive` or `__cplusplus` guard added | ✅ Pass | `git diff 454075bc6 ad0dbd181` adds none, and neither does `git diff ad0dbd181` of the final revision, this guide excluded, which holds the later build-script fixes, CI hardening, comment corrections and README corrections (Section 5.4.4). This guide names them only as prohibitions, and `__cplusplus` also in the scratch probe of Section 3.3, which is never committed |
 | Submodules and vendored code | Submodule sources untouched; vendored code patched only on failure | ✅ Pass | No diff under `external/` (Section 5.4.3) |
 | Windows verification runbook | A maintainer can confirm the Windows checks from a clean setup | ✅ Pass | Section 5.3 |
 
@@ -564,9 +568,9 @@ No user-specified rules were provided for this project, so every divergence belo
 | The user's Windows fix `429a20174` (`utf16_to_utf8`) retained | `static_cast<const void*>(root_path)`, the plan's uniform fix for the category | `429a20174` was reverted with the earlier pass; re-landing a text conversion changes log output, which needs the owner | The log line prints a pointer value, exactly as at C++17 | Owner decides whether to re-land the UTF-8 text (human-finish item 6) |
 | Refresh `docs/COMPILING_DEBUGGING_TESTING.md:49-56` and the `src/crypto/CMakeLists.txt:99` comment from 3.25 to 3.20 | Nothing to refresh | After the revert, the docs file is the upstream file with no CMake-floor text, and the comment already says "NEW from policy version 3.20" | None | None |
 | Only the AAP's listed edits to `CMakeLists.txt` | Also `CMP0144` NEW (`CMakeLists.txt:968-973`) | With CMP0074 NEW at 3.20, CMake 3.27+ warns about the upper-case `BOOST_ROOT` that the depends toolchain sets | Removes a configure warning on depends builds | None |
-| Acceptance figures from the run on the final candidate (AAP 0.10.4); only the listed edits to `CMakeLists.txt` and `contrib/guix/manifest.scm` (AAP 0.5.1) | The run measured `ad0dbd181`. After it, three fixes of pre-existing build-script defects found in review landed: in `CMakeLists.txt` the `CMakeLists_IOS.txt` include, `check_submodule()` and the header-glob comments; in the manifest the `HOST` check; and the `cmake/CheckTrezor.cmake` change in the next row (Section 5.4.4) | Each is a defect of the upstream scripts, not a C++23 trigger | None on the figures: the fixes touch no C or C++ source, and configured with the acceptance options both trees give identical compile databases (A 407/407, E 453/453 entries, 0 differences); only the generated version tag differs. No local build exercises the manifest change | `guix.yml` on the pushed commit exercises the manifest (human-finish item 1) |
-| `cmake/CheckTrezor.cmake` unchanged, a reference for the standard forwarding and the in-tree message regeneration (AAP 0.5.1) | Changed, +30/−18: the mandatory gate tests the `USE_DEVICE_TREZOR_MANDATORY` option, the protobuf probe receives the prepared linker flags, and Trezor readiness is published only after the LibUSB check (Section 5.4.4) | Configurations E and F with E's options rely on `USE_DEVICE_TREZOR_MANDATORY=ON` making a failed Trezor check fail configure; with the `-D` option alone, the check switched Trezor off with a warning and configure succeeded | The standard forwarding and the regeneration block are unchanged; E's compile database is identical (453/453 entries) and E logs "Trezor: support enabled" | None |
-| CI runs on the pushed candidate (AAP 0.8.7) | Pending | No GitHub Actions, macOS, Windows or Guix host is reachable from the execution environment | Platform-only code paths (`_WIN32`, `__APPLE__`, FreeBSD, Android) are compiled only by CI | Human-finish item 1 |
+| Acceptance figures from the run on the final candidate (AAP 0.10.4); only the listed edits to `CMakeLists.txt`, `contrib/guix/manifest.scm`, the two CI workflows and `README.md` (AAP 0.5.1) | The run measured `ad0dbd181`. After it, three fixes of pre-existing build-script defects found in review landed: in `CMakeLists.txt` the `CMakeLists_IOS.txt` include, `check_submodule()` and the header-glob comments; in the manifest the `HOST` check; and the `cmake/CheckTrezor.cmake` change in the next row (Section 5.4.4). So did the CI workflow supply-chain hardening of `build.yml` and `depends.yml`, three comment corrections (`CMakeLists.txt:132`, `:846`; `cmake/CheckTrezor.cmake:209`), and README corrections beyond the plan's README edits: the Dependencies paragraph (`README.md:138`) and the Fedora GCC and pkg-config packages (`:142`, `:145`) (Section 5.4.4) | Each is a defect of the upstream scripts, not a C++23 trigger; the hardening answers review findings on token scope, mutable action and image references, unpinned Python packages and binutils provenance; the comment and README corrections answer review findings on comments and README statements that misdescribed the build | Every figure is a measurement of `ad0dbd181`; final-candidate acceptance is **pending** (human-finish item 9 (g)). The fixes touch no C or C++ source, and a configure-only comparison of the final tree made while revising this guide found identical compile databases (A 407/407, E 453/453 entries, 0 differences; Section 3 introduction), but it kept no output in `<run>`, is not acceptance evidence and reaches only the success paths of the changed configure code. The comment corrections change only comment lines; the hardening and the README corrections change no input of the local acceptance builds. No local build exercises the manifest change or the hardened workflows | Repeat the acceptance run on the final revision (human-finish item 9 (g)); `guix.yml` on the pushed commit exercises the manifest, and `build.yml` and `depends.yml` the hardening (human-finish item 1) |
+| `cmake/CheckTrezor.cmake` unchanged, a reference for the standard forwarding and the in-tree message regeneration (AAP 0.5.1) | Changed, +30/−18: the mandatory gate tests the `USE_DEVICE_TREZOR_MANDATORY` option, the protobuf probe receives the prepared linker flags, and Trezor readiness is published only after the LibUSB check (Section 5.4.4) | Configurations E and F with E's options rely on `USE_DEVICE_TREZOR_MANDATORY=ON` making a failed Trezor check fail configure; with the `-D` option alone, the check switched Trezor off with a warning and configure succeeded | The standard forwarding and the regeneration block are unchanged. E's compile database is identical (453/453 entries) only under the configure-only comparison made while revising this guide (Section 3 introduction), which is not acceptance evidence; E logged "Trezor: support enabled" at `ad0dbd181`. Acceptance of the final revision is **pending** (human-finish item 9 (g)) | Repeat the acceptance run on the final revision (human-finish item 9 (g)) |
+| CI runs on the pushed candidate (AAP 0.8.7) | Pending | No GitHub Actions, macOS, Windows or Guix host is reachable from the execution environment | The `__APPLE__`, FreeBSD and Android code paths are compiled only by CI, and native Windows (MSYS2 build, reduced tests, runtime) is exercised only by CI. Locally, only the Debian 13 MinGW-w64 cross build compiled the `_WIN32` code of the 13 Windows executables, with no tests built and nothing run (Section 5.3.9) | Human-finish item 1 |
 | `compile_commands.json` entries of every twin pair differ only in `-std=` and the roots, confirmed before any comparison (AAP 0.8.3) | Confirmed for A and C only | This execution kept no comparison output for B, D or the two E pairs | Those four pairs' census results stand as measured but are not accepted | Run the Section 3.2 comparison for each (human-finish item 9) |
 | Every cached depends archive name differs between the twins, and a twin failing any verifier item is rebuilt (AAP 0.8.2) | The ten target archives differ; `native_protobuf` keeps `64f1bce9bf6` in both, and the C-recipe and native dialect items were not recorded | The prescribed command sets only `HOST_ID_SALT`, which native IDs never read (`contrib/depends/Makefile:101-106`) | The twins are not accepted: the package census and the depends-built Monero census stand as measured | Rebuild both twins in new copies with distinct `BUILD_ID_SALT` values as well as the host salts, recipes unchanged (Section 3.3, human-finish item 9) |
 | The depends verifier's "The C recipes carry `-std=c11`", with a failing twin rebuilt (AAP 0.8.2) | **Not met**, and it cannot be met with the recipes unchanged; the recipe-aware check (iv-s) is reported beside it as supplementary evidence, not in its place (Section 3.3) | `openssl`'s `Configure` receives no `CFLAGS` (`contrib/depends/packages/openssl.mk:9`), ncurses builds its `make_hash`/`make_keys` helpers with the build compiler (`ncurses.mk:13`), and `hidapi`'s CMake build echoes no compile line, so no rebuild clears the item | The depends twins cannot be accepted until the owner decides; no twin varies `C_STANDARD`, so the affected lines compile identically at both standards | Owner's decision: open acceptance blocker 3 below (human-finish item 10) |
@@ -616,8 +620,8 @@ The work is done when the pushed candidate commit passes the three Windows check
 
 | Check (job name in GitHub) | Workflow | Defined at | What it runs on this change set |
 |---|---|---|---|
-| `Windows (MSYS2)` | `ci/gh-actions/cli` | `.github/workflows/build.yml:74-111` | Native build of target `all` in MSYS2 UCRT64 on `windows-latest` with MSYS2's rolling MinGW-w64 GCC, then the reduced test tier |
-| `Win64` | `ci/gh-actions/depends` | `.github/workflows/depends.yml:48-51` (matrix entry), `:77-144` (steps) | `make depends target=x86_64-w64-mingw32` in `debian:13`, with Debian's MinGW-w64 GCC 14 (package 14.2.0-19+27, posix thread model), then upload of `monerod.exe` and `monero-wallet-cli.exe` |
+| `Windows (MSYS2)` | `ci/gh-actions/cli` | `.github/workflows/build.yml:79-117` | Native build of target `all` in MSYS2 UCRT64 on `windows-latest` with MSYS2's rolling MinGW-w64 GCC, then the reduced test tier |
+| `Win64` | `ci/gh-actions/depends` | `.github/workflows/depends.yml:53-56` (matrix entry), `:82-164` (steps) | `make depends target=x86_64-w64-mingw32` in `debian:13`, with Debian's MinGW-w64 GCC 14 (package 14.2.0-19+27, posix thread model), then upload of `monerod.exe` and `monero-wallet-cli.exe` |
 | `x86_64-w64-mingw32` | `ci/gh-actions/guix` | `.github/workflows/guix.yml:3-19` (triggers), `:54` (target), `:109` (build) | Reproducible Guix release build of the Windows triple, with the `gcc-14.2` cross compiler (`contrib/guix/manifest.scm:86-93`) |
 
 - `Windows (MSYS2)` and `Win64` run on every push and pull request that changes anything outside `docs/**` and `**/README.md` (`build.yml:3-11`, `depends.yml:3-11`).
@@ -647,7 +651,7 @@ Every claim below is marked **verified here** or **not verified here**.
 
 ### 5.3.4 Step 1 — Set up MSYS2 UCRT64 the way CI does
 
-CI prepares Windows with `msys2/setup-msys2@v2` (`build.yml:91-96`):
+CI prepares Windows with `msys2/setup-msys2`, pinned to v2.33.0 at commit `ec48f7c5447b3140e2b088413ae3a55687bccb6e` (`build.yml:97-102`):
 
 ```yaml
 msystem: ucrt64
@@ -677,7 +681,7 @@ pacman -S --needed curl            # not in CI's list; used only by the smoke ru
 pacboy -S --needed python:p        # not in CI's list; used only by the Step 5.5 census
 ```
 
-`protobuf` and `libusb` are required, not optional: CI makes Trezor support mandatory (`build.yml:30`), and configure fails without them.
+`protobuf` and `libusb` are required, not optional: CI makes Trezor support mandatory (`build.yml:34`), and configure fails without them.
 
 **1.5 Check the environment.**
 
@@ -691,7 +695,7 @@ cargo --version                 # Rust is mandatory: src/CMakeLists.txt:91 alway
 
 MSYS2's CMake uses the Ninja generator by default, and CI passes no `-G` (https://www.msys2.org/docs/cmake/). If `which` finds no `ninja`, run `pacboy -S --needed ninja:p`. You are in the wrong shell (5.3.11) when `$MSYSTEM` is not `UCRT64`, or a tool resolves outside `$MINGW_PREFIX/bin`.
 
-> **MINGW64 alternative — not the environment CI checks.** Open **MSYS2 MINGW64** (`C:\msys64\mingw64.exe`). The `pacboy` lines work unchanged, because `:p` follows the shell. Read `UCRT64`, `/ucrt64` and `mingw-w64-ucrt-x86_64-` in this runbook as `MINGW64`, `/mingw64` and `mingw-w64-x86_64-`. MINGW64 links against `msvcrt` rather than `ucrt`, so never share objects or a `build/` directory between the two environments. A MINGW64 result is not a pipeline result, because `build.yml:93` pins `msystem: ucrt64`.
+> **MINGW64 alternative — not the environment CI checks.** Open **MSYS2 MINGW64** (`C:\msys64\mingw64.exe`). The `pacboy` lines work unchanged, because `:p` follows the shell. Read `UCRT64`, `/ucrt64` and `mingw-w64-ucrt-x86_64-` in this runbook as `MINGW64`, `/mingw64` and `mingw-w64-x86_64-`. MINGW64 links against `msvcrt` rather than `ucrt`, so never share objects or a `build/` directory between the two environments. A MINGW64 result is not a pipeline result, because `build.yml:99` pins `msystem: ucrt64`.
 
 **No Windows machine?** Step 6 reproduces the `Win64` check in Docker `debian:13`, or WSL, and needs no MSYS2.
 
@@ -728,7 +732,7 @@ The chain stops at the first failure, so nothing is cloned until both values che
 
 ### 5.3.6 Step 3 — Build and collect every error
 
-CI configures and builds with `BUILD_DEFAULT` (`build.yml:17`), shown here verbatim:
+CI configures and builds with `BUILD_DEFAULT` (`build.yml:21`), shown here verbatim:
 
 ```bash
 cmake -S . -B build -D ARCH="default" -D BUILD_TESTS=ON -D BUILD_GUI_DEPS=ON -D ENABLE_FUZZ_TEST=ON -D CMAKE_BUILD_TYPE=Release && cmake --build build --target all
@@ -739,7 +743,7 @@ That command stops at the first failure. Run its configure half unchanged and th
 ```bash
 # From now on, a pipeline into tee fails when the command before tee fails.
 set -o pipefail
-# CI sets this for every job (build.yml:30). It seeds the default of cmake/CheckTrezor.cmake's
+# CI sets this for every job (build.yml:34). It seeds the default of cmake/CheckTrezor.cmake's
 # USE_DEVICE_TREZOR_MANDATORY option, which makes a Trezor configure failure fatal; CI's command
 # passes no -D for it. A default applies only to a new build/: a cache that holds OFF keeps it.
 export USE_DEVICE_TREZOR_MANDATORY=ON
@@ -857,7 +861,7 @@ Run these in the same UCRT64 shell, with the variables from Step 3 still exporte
 
 Both executables must be listed. `ls` runs only after a passing build, so it cannot list executables left over from an earlier one. If the Step 3 status was not 0, return to Step 4.3.
 
-**5.2 Run CI's reduced test tier.** The `cd build` and `env … ctest` lines are `CTEST_EXCLUDE_SLOW` (`build.yml:27-29`) verbatim. The lines around them count the tests the exclusion selects, so a run that selects nothing cannot pass silently, and keep `ctest`'s status past `cd ..`:
+**5.2 Run CI's reduced test tier.** The `cd build` and `env … ctest` lines are `CTEST_EXCLUDE_SLOW` (`build.yml:31-33`) verbatim. The lines around them count the tests the exclusion selects, so a run that selects nothing cannot pass silently, and keep `ctest`'s status past `cd ..`:
 
 ```bash
 cd build
@@ -1009,10 +1013,17 @@ echo "build exit status: $?"    # must be 0 in both trees
 
 Both `build-census/version.cpp` files must be identical: the twin keeps `.git`, so both carry the same version tag.
 
-**Compare.** Save the comparison script outside both checkouts, then run it with each tree's typed roots, its source copy (`src=`) and its build directory (`build=`), each in both spellings the tools print:
+**Compare.** The block saves the comparison script in a new, private directory that `mktemp -d` creates outside both checkouts, and runs it from there with each tree's typed roots, its source copy (`src=`) and its build directory (`build=`), each in both spellings the tools print. It runs in a subshell, so a failure cannot close your shell and its cleanup trap ends with it. It runs the script only after both the directory and the file were written, and when it ends, by an interrupt too, it deletes only that file and that directory:
 
 ```bash
-cat > /tmp/twin-census.py <<'EOF'
+(    # a subshell: its traps and exits end with it, so your shell keeps running
+CENSUS_DIR= CENSUS_PY=
+trap '[ -z "$CENSUS_PY" ] || rm -f -- "$CENSUS_PY"; [ -z "$CENSUS_DIR" ] || rmdir -- "$CENSUS_DIR"' EXIT    # only this run's file and directory
+trap 'exit 130' INT; trap 'exit 143' TERM    # an interrupt still runs that cleanup
+CENSUS_DIR=$(mktemp -d "${TMPDIR:-/tmp}/twin-census.XXXXXX") ||    # new, empty and private (mode 700)
+  { echo "census: cannot create a directory in ${TMPDIR:-/tmp}; the script did not run" >&2; exit 3; }
+CENSUS_PY=$CENSUS_DIR/twin-census.py
+cat > "$CENSUS_PY" <<'EOF' || { echo "census: cannot write $CENSUS_PY; the script did not run" >&2; exit 3; }
 import collections, posixpath, re, sys
 # Twin census: python3 twin-census.py BASE.log BASE-ROOTS CAND.log CAND-ROOTS
 # ROOTS is a comma-separated list of TYPE=PATH: src (a source copy; repeat it for each spelling of the
@@ -1176,10 +1187,11 @@ print("new keys by class: " + ", ".join("%s %d" % (name, new[name]) for name in 
 print("new keys: %d" % sum(new.values()))
 sys.exit(1 if new else 0)
 EOF
-python3 /tmp/twin-census.py \
+python3 "$CENSUS_PY" \
   monero-cxx17/census-build.log "src=$(cygpath -m "$PWD/monero-cxx17"),src=$PWD/monero-cxx17,build=$(cygpath -m "$PWD/monero-cxx17/build-census"),build=$PWD/monero-cxx17/build-census" \
   monero/census-build.log "src=$(cygpath -m "$PWD/monero"),src=$PWD/monero,build=$(cygpath -m "$PWD/monero/build-census"),build=$PWD/monero/build-census"
-echo "census exit status: $?"    # 0: no new key; 1: a new key; 2: bad arguments or an unreadable log
+)
+echo "census exit status: $?"    # 0: no new key; 1: a new key; 2: bad arguments or an unreadable log; 3: the script could not be saved and did not run; 130 or 143: interrupted
 ```
 
 - **Keys.** Every warning with a location is keyed `(flag, file:line)`. Every other warning, from the linker, the compiler driver, `make` or `libtool`, is keyed `(LINK/DRIVER, line)` on its complete normalized line, tool prefix included (`/usr/bin/ld: warning: …`, `clang++-19: warning: …`), so object and library names stay in the key: a note about `bar.o` never stands in for one about `foo.o`. In a depends package log every key also carries the package being built, so equal text from two packages is two keys.
@@ -1190,21 +1202,21 @@ echo "census exit status: $?"    # 0: no new key; 1: a new key; 2: bad arguments
 - **Expected baseline-only or reduced keys.** On Linux GCC 14.2, only lower counts of libstdc++ keys such as `typeinfo:205`; on Clang, also the five `-Wc++20-extensions` keys for `[=, this]`, which C++17 reports and C++23 does not. They never fail the check.
 - **A new key** is resolved where it arises: in repository code with the Step 4.3 row for its construct; in a dependency it is reported as an open acceptance blocker (Section 5.2), never suppressed.
 
-*Verified here:* the script exactly as printed, extracted from this guide: it compiles with `python3 -m py_compile` and passes `pyflakes`, and this block passes `bash -n`. On constructed logs it reports a linker note that moves from `foo.o` to `bar.o` as one new key with exit status 1; compares the twins' source and build roots, `version.cpp` and salted depends package IDs as equal with exit status 0; reports a file that one package warned about and another now does as a new key; and assigns each of the seven classes, MSYS2-style nested `build-census` roots in both spellings included. Its root boundaries were checked the same way: with the roots `/w/base` and `/w/cand`, a warning under the siblings `/w/base@2/` and `/w/cand@2/` is one new key with exit status 1, and so is one under `/w/base2/` and `/w/cand2/`; a path that only contains the root, `/unrelated/w/base/…` against `/unrelated/w/cand/…`, gives a new key for the located warning and another for the same path in a `/usr/bin/ld: warning:` message, exit status 1; `'-I/w/base/src'` against `'-I/w/cand/src'` in a Clang driver warning compares equal with exit status 0, as do the roots after `-I`, `-Wl,-rpath,`, `=`, a quote and a bracket; and a staged header in both joins, directly after the ID and through a doubled slash, reads `<pkg:name><depends>/…` in both twins. On fresh GCC 14.2 Debug (B) twin logs of the candidate it keeps the three `ld` executable-stack notes, one per assembler object, as three equal keys (3 / 3 → 3 / 3, 0 new). On fresh x86_64 depends twin logs of all eleven packages it gives 50 / 34 → 155 / 69 with exactly 35 new keys, all protobuf's `-Wdeprecated-enum-enum-conversion` under `<pkg:protobuf>/google/protobuf/generated_message_tctable_impl.h`, and keeps the `noreturn` keys of `native_protobuf` and `protobuf` apart. These checks are of the script; they do not replace the `<run>` census of Section 3.3. *Not verified here:* any Windows log, and `cygpath -m` output.
+*Verified here:* the script exactly as printed, extracted from this guide: it compiles with `python3 -m py_compile` and passes `pyflakes`, and this block passes `bash -n`. On constructed logs it reports a linker note that moves from `foo.o` to `bar.o` as one new key with exit status 1; compares the twins' source and build roots, `version.cpp` and salted depends package IDs as equal with exit status 0; reports a file that one package warned about and another now does as a new key; and assigns each of the seven classes, MSYS2-style nested `build-census` roots in both spellings included. Its root boundaries were checked the same way: with the roots `/w/base` and `/w/cand`, a warning under the siblings `/w/base@2/` and `/w/cand@2/` is one new key with exit status 1, and so is one under `/w/base2/` and `/w/cand2/`; a path that only contains the root, `/unrelated/w/base/…` against `/unrelated/w/cand/…`, gives a new key for the located warning and another for the same path in a `/usr/bin/ld: warning:` message, exit status 1; `'-I/w/base/src'` against `'-I/w/cand/src'` in a Clang driver warning compares equal with exit status 0, as do the roots after `-I`, `-Wl,-rpath,`, `=`, a quote and a bracket; and a staged header in both joins, directly after the ID and through a doubled slash, reads `<pkg:name><depends>/…` in both twins. On fresh GCC 14.2 Debug (B) twin logs of the candidate it keeps the three `ld` executable-stack notes, one per assembler object, as three equal keys (3 / 3 → 3 / 3, 0 new). On fresh x86_64 depends twin logs of all eleven packages it gives 50 / 34 → 155 / 69 with exactly 35 new keys, all protobuf's `-Wdeprecated-enum-enum-conversion` under `<pkg:protobuf>/google/protobuf/generated_message_tctable_impl.h`, and keeps the `noreturn` keys of `native_protobuf` and `protobuf` apart. These checks are of the script; they do not replace the `<run>` census of Section 3.3. The block itself was run whole on Linux, from a directory holding constructed `monero-cxx17/census-build.log` and `monero/census-build.log`, with a stand-in `cygpath -m` that prints its argument: it ran the script from a new mode-700 directory, printed `census exit status: 0` for equal logs and `1` for one extra candidate warning, and left `$TMPDIR` as it found it, a symlink planted at `$TMPDIR/twin-census.py` and that link's target included. With `TMPDIR` missing, not a directory or not writable, or with the file write cut short by a file-size limit, it printed its `census:` line and `census exit status: 3` without starting Python, and the interactive `bash` it was pasted into kept running with no trap set. A `SIGINT` to its process group, or a `SIGTERM`, during the run removed the new directory and its file. *Not verified here:* any Windows log, `cygpath -m` output, and the block under MSYS2's `bash`, `mktemp` and `/tmp`.
 
 ### 5.3.9 Step 6 — Cross-build on Linux or WSL (the `Win64` check)
 
 This step mirrors the `Win64` entry of `depends.yml`, and it is also the route for anyone without a Windows machine. It needs an x86_64 Linux host with Docker, or WSL running Debian 13. A cold run first builds every depends package from source.
 
-**6.1 Start the job's container.** The job runs in `debian:13` as root (`depends.yml:27-31`):
+**6.1 Start the job's container.** The job runs in `debian:13`, pinned by digest, as root (`depends.yml:31-36`):
 
 ```bash
-docker run -it --name monero-win64 debian:13 bash
+docker run -it --name monero-win64 debian:13@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a004585c bash
 ```
 
 In WSL Debian 13 as an ordinary user, skip Docker and prefix the `apt` and `update-alternatives` lines below with `sudo env DEBIAN_FRONTEND=noninteractive`, because `sudo` drops exported variables. `docker start -ai monero-win64` re-enters a container you left; `docker rm monero-win64` on the host removes it.
 
-**6.2 Install the job's toolchain.** These are the workflow's install steps (`depends.yml:79-93`), with the `Win64` matrix values from `:48-51` substituted:
+**6.2 Install the job's toolchain.** These are the workflow's install steps (`depends.yml:84-91`, `:106-112`), with the `Win64` matrix values from `:53-56` substituted:
 
 ```bash
 export DEBIAN_FRONTEND=noninteractive
@@ -1221,9 +1233,10 @@ export PATH="$HOME/.cargo/bin:$PATH"
 - `apt update --error-on=any &&` stops on a failed index download, which plain `apt update` only warns about.
 - `rustup-init` runs only after `sha256sum -c` printed `rustup-init: OK`. On a mismatch, delete the file and download it again; never skip or edit the check.
 - Debian 13's `g++-mingw-w64-x86-64` pulls in the posix thread-model compiler, `g++-mingw-w64-x86-64-posix`, with `binutils-mingw-w64-x86-64` 2.44.
-- The job also runs `git config --global --add safe.directory '*'` (`depends.yml:94-95`) for the runner's mounted workspace. Do not copy it: a fresh clone needs no exception, and for a mounted host directory trust only that path.
+- The job also runs `record toolchain provenance` (`depends.yml:92-105`) between `install dependencies` and `install rust`: it lists the installed toolchain packages and fails unless every installed binutils package is the archive's newest candidate. Reproducing it here is optional.
+- The job also runs `git config --global --add safe.directory '*'` (`depends.yml:113-114`) for the runner's mounted workspace. Do not copy it: a fresh clone needs no exception, and for a mounted host directory trust only that path.
 
-**6.3 Get the source and select the posix compilers.** Set `REPOSITORY_URL` and `PR_BRANCH` as in Step 2. The two `update-alternatives --set` lines are the workflow's "prepare w64-mingw32" step (`depends.yml:116-120`):
+**6.3 Get the source and select the posix compilers.** Set `REPOSITORY_URL` and `PR_BRANCH` as in Step 2. The two `update-alternatives --set` lines are the workflow's "prepare w64-mingw32" step (`depends.yml:136-140`):
 
 ```bash
 GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads "$REPOSITORY_URL" "$PR_BRANCH" &&
@@ -1235,7 +1248,7 @@ update-alternatives --display x86_64-w64-mingw32-g++ | head -3    # "manual mode
 x86_64-w64-mingw32-g++ --version | head -1                       # x86_64-w64-mingw32-g++ (GCC) 14-posix
 ```
 
-**6.4 Build.** The build command is `depends.yml:122-125`, with the job count from the Linux branch of the job-count action (`.github/actions/set-make-job-count/action.yml:21`):
+**6.4 Build.** The build command is `depends.yml:142-145`, with the job count from the Linux branch of the job-count action (`.github/actions/set-make-job-count/action.yml:21`):
 
 ```bash
 set -o pipefail
@@ -1250,10 +1263,10 @@ file build/x86_64-w64-mingw32/release/bin/monerod.exe build/x86_64-w64-mingw32/r
 ```
 
 - The root `Makefile:47-49` builds the depends packages, configures `build/x86_64-w64-mingw32/release` against the generated toolchain file with `USE_DEVICE_TREZOR_MANDATORY=1`, and runs `make` there.
-- `file` must report a `PE32+ executable … x86-64 … MS Windows` for both artefacts, the files the job uploads (`depends.yml:138-144`).
+- `file` must report a `PE32+ executable … x86-64 … MS Windows` for both artefacts, the files the job uploads (`depends.yml:158-164`).
 - To copy them out, run `docker cp monero-win64:/monero/build/x86_64-w64-mingw32/release/bin ./win64-bin` on the host.
 
-*Verified here* (`<run>/logs/win64/`): Steps 6.2-6.4, run in `debian:13` (Debian 13.7) on a copy of the candidate, with the upstream source tarballs pre-seeded and checked by each recipe's sha256.
+*Verified here* (`<run>/logs/win64/`): Steps 6.2-6.4, run in `debian:13` (Debian 13.7) on a copy of the candidate at `ad0dbd181`, with the upstream source tarballs pre-seeded and checked by each recipe's sha256.
 
 - **Toolchain** (`tools.log`, `mingw-version.log`): native `gcc` 14.2.0-19; `g++-mingw-w64-x86-64` 14.2.0-17+27, `g++-mingw-w64-x86-64-posix` and `gcc-mingw-w64-base` 14.2.0-19+27+b1, `binutils-mingw-w64-x86-64` 2.44-3+12+b1; CMake 3.31.6; cargo and rustc 1.93.1 with the `x86_64-pc-windows-gnu` target. Debian's MinGW-w64 compiler reports its version as `14-posix` (`__GNUC__` 14, `__GNUC_MINOR__` 0), so CMake identifies it as GNU 14.0.0, above the floor of 13.
 - **Thread model.** Before the two `--set` lines, `update-alternatives --display` reports `link best version is /usr/bin/x86_64-w64-mingw32-g++-win32`; after them, `manual mode` and `link currently points to /usr/bin/x86_64-w64-mingw32-g++-posix`. The step is required on Debian 13 too.
@@ -1324,18 +1337,18 @@ The fix is already committed (Step 4), so there is nothing to decide or commit. 
 
 ## 5.4 C++23 Migration Record
 
-This section is the migration's record of what changed and why. It describes the final tree: commit `ad0dbd181`, which the acceptance run measured, plus the three build-script fixes of Section 5.4.4 and this guide. Acceptance numbers live in Section 3, which says why they hold for the final tree; this section cites them. The discovery, search, probe and trigger evidence lives under `<trig>`, this execution's trigger-discovery work directory, which is separate from `<run>`. Like `<run>`, it lies outside the repository and is not committed, and the commands this section names reproduce every file in it. No attachments, design frames or external design URLs were supplied with the request; the technical references cited inline are sources for facts, not design inputs.
+This section is the migration's record of what changed and why. It describes the final tree: commit `ad0dbd181`, which the acceptance run measured, plus the three build-script fixes, the CI workflow supply-chain hardening, the three comment corrections and the README corrections of Section 5.4.4, and this guide. Acceptance numbers live in Section 3, which says they were measured on `ad0dbd181` and that their acceptance for the final tree is pending; this section cites them. The discovery, search, probe and trigger evidence lives under `<trig>`, this execution's trigger-discovery work directory, which is separate from `<run>`. Like `<run>`, it lies outside the repository and is not committed. This section names the scripts and commands behind the `<trig>` files it cites but does not reproduce the scripts' text, so its counts are this execution's recorded results; `typed-search.py`'s typed inventories, hit counts and self-test have no independent replay yet (Section 5.4.1, audit method, pass 3). No attachments, design frames or external design URLs were supplied with the request; the technical references cited inline are sources for facts, not design inputs.
 
-**History.** An earlier pass (merge `861efbceb`: 35 files, +3074/−273 against upstream `454075bc6`, including this guide at `8fe8e4965` and the user's commit `429a20174`) was reverted in full by `f7c9079e7`, which leaves the tree byte-identical to `454075bc6`. This execution then landed the migration in four commits: `f74ce84bc` (Guix GCC 14.2.0), `1434574c4` (C++23, CMake 3.20, floors, source fixes, depends CI on `debian:13`), `03eb50eeb` (system CI on GCC 14.2) and `ad0dbd181` (README). `git diff 454075bc6 ad0dbd181 --stat` shows 26 files, +353/−263. Every source edit below therefore comes from `1434574c4`, and none is a carried-over legacy edit. After the acceptance run, three fixes of pre-existing build-script defects found in review (Section 5.4.4), none of them a source edit, changed `CMakeLists.txt` and `contrib/guix/manifest.scm` again and a 27th file, `cmake/CheckTrezor.cmake`: against `454075bc6` the final tree changes 27 files, +399/−293, and this guide is the 28th. The trigger ledger in Section 5.4.2 gives each conditional hunk the compile error or new diagnostic key that required it (source-edit rule, Appendix G), and names the 16 hunks without one of their own and the triggered fix each belongs to.
+**History.** An earlier pass (merge `861efbceb`: 35 files, +3074/−273 against upstream `454075bc6`, including this guide at `8fe8e4965` and the user's commit `429a20174`) was reverted in full by `f7c9079e7`, which leaves the tree byte-identical to `454075bc6`. This execution then landed the migration in four commits: `f74ce84bc` (Guix GCC 14.2.0), `1434574c4` (C++23, CMake 3.20, floors, source fixes, depends CI on `debian:13`), `03eb50eeb` (system CI on GCC 14.2) and `ad0dbd181` (README). `git diff 454075bc6 ad0dbd181 --stat` shows 26 files, +353/−263. Every source edit below therefore comes from `1434574c4`, and none is a carried-over legacy edit. After the acceptance run, three fixes of pre-existing build-script defects found in review, the CI workflow supply-chain hardening, three comment corrections and the README corrections (Section 5.4.4), none of them a source edit, changed `CMakeLists.txt`, `contrib/guix/manifest.scm`, the two workflows and `README.md` again and a 27th file, `cmake/CheckTrezor.cmake`: against `454075bc6` the final tree changes 27 files, +500/−326, and this guide is the 28th. The trigger ledger in Section 5.4.2 gives each conditional hunk the compile error or new diagnostic key that required it (source-edit rule, Appendix G), and names the 16 hunks without one of their own and the triggered fix each belongs to.
 
 ### 5.4.1 Breaking-change categories encountered
 
-**Coordinates.** Sections 5.4.1 and 5.4.2 compare upstream `454075bc6` with the candidate `ad0dbd181`. Upstream is identical to `f7c9079e7` (`git diff 454075bc6 f7c9079e7` is empty). The three later build-script fixes (Section 5.4.4) move none of these coordinates: they touch no C or C++ file and not `src/crypto/CMakeLists.txt`, and their `CMakeLists.txt` edit shifts no line these sections cite. The Section 5.4.2 row that lists them gives final-tree lines. `a→b` gives a site's upstream and candidate lines, a single number is the same line in both, and "new" marks lines only the candidate has. Hunk counts are those of `git diff -U0 f7c9079e7 ad0dbd181`; `<trig>/diff/hunk-map.txt` lists each conditional file's hunks with their upstream and candidate starts. The default three lines of context merge neighbouring hunks, giving 17 for `http_auth.cpp` and 28 for `tests/unit_tests/http.cpp`. "Frozen" marks the five logic-frozen directories: `src/cryptonote_core`, `src/cryptonote_basic`, `src/crypto`, `src/ringct` and `src/blockchain_db`.
+**Coordinates.** Sections 5.4.1 and 5.4.2 compare upstream `454075bc6` with the candidate `ad0dbd181`. Upstream is identical to `f7c9079e7` (`git diff 454075bc6 f7c9079e7` is empty). The later build-script fixes, CI hardening, comment corrections and README corrections (Section 5.4.4) move none of these coordinates: they touch no C or C++ file and not `src/crypto/CMakeLists.txt`, and their `CMakeLists.txt` edits shift no line these sections cite. The Section 5.4.2 row that lists them gives final-tree lines. `a→b` gives a site's upstream and candidate lines, a single number is the same line in both, and "new" marks lines only the candidate has. Hunk counts are those of `git diff -U0 f7c9079e7 ad0dbd181`; `<trig>/diff/hunk-map.txt` lists each conditional file's hunks with their upstream and candidate starts. The default three lines of context merge neighbouring hunks, giving 17 for `http_auth.cpp` and 28 for `tests/unit_tests/http.cpp`. "Frozen" marks the five logic-frozen directories: `src/cryptonote_core`, `src/cryptonote_basic`, `src/crypto`, `src/ringct` and `src/blockchain_db`.
 
 **Audit method.** Four passes cover `src`, `contrib/epee`, `tests` and the vendored `external/easylogging++`, `external/qrcodegen` and `external/boost`:
 1. **Discovery**: upstream built as C++23 against its C++17 twin (record below).
 2. **Proof of absence**: the candidate's own builds A–F, census and libc++ pass (Section 3.3).
-3. **Source search** per category, for what a compiler reports only when it compiles it: uninstantiated templates, `#if` branches no build defines (`WIN32`, `ELPP_UNICODE`) and comments. `<trig>/search/run-search.sh` runs `grep -rnIE '<pattern>' src contrib/epee tests external/easylogging++ external/qrcodegen external/boost` in `<trig>/tree/up17` (upstream) and `<trig>/tree/cand` (candidate). For the two categories whose operand types grep cannot see, enum arithmetic and array comparison, it runs `<trig>/search/typed-search.py` instead: a declaration inventory, then an expression search, with comments and literals blanked. `<trig>/search/<category>.txt` holds each pattern, both trees' hits and their classification; `<trig>/search/summary.txt` the counts.
+3. **Source search** per category, for what a compiler reports only when it compiles it: uninstantiated templates, `#if` branches no build defines (`WIN32`, `ELPP_UNICODE`) and comments. `<trig>/search/run-search.sh` runs `grep -rnIE '<pattern>' src contrib/epee tests external/easylogging++ external/qrcodegen external/boost` in `<trig>/tree/up17` (upstream) and `<trig>/tree/cand` (candidate). For the two categories whose operand types grep cannot see, enum arithmetic and array comparison, it runs `<trig>/search/typed-search.py` instead: a declaration inventory, then an expression search, with comments and literals blanked. `typed-search.py` is not committed and its text is not in this guide, so its inventories, hit counts and self-test results (the enum-arithmetic and array-comparison rows below) are this execution's recorded results in `<trig>/search/`, not independently verified counts. Their independent replay is pending: it needs that script or a re-implementation of the two steps those rows describe. `<trig>/search/<category>.txt` holds each pattern, both trees' hits and their classification; `<trig>/search/summary.txt` the counts.
 4. **Probe**: `<trig>/probe/probe.cpp` holds one instance of every category, each selected by `-DCAT_<NAME>`, plus three valid forms the tree keeps (`-DCTRL_*`: a `u8` array initialiser and character literal, a member-free `[=]`, a read- and assign-only `volatile`). `<trig>/probe/run-probe.sh` compiles each with `g++-14` 14.2.0 and `clang++-19` 19.1.1 at `-std=c++23 -Wall -Wextra -c`, at `-std=c++17` as the contrast, and with `clang++-19` against the libc++ 19 headers (`-stdlib=libc++ -nostdinc++ -isystem $ACC_ENV/libcxx-19/usr/lib/llvm-19/include/c++/v1`); the middle-end category also at `-O2`, `-O3` and configuration A's Release flags; then every block in one translation unit (`-DCAT_ALL`, Clang with `-ferror-limit=0`), which reproduces each per-category result. Logs: `<trig>/probe/logs/<CAT>.<gcc|clang|libcxx>.<std>.log`; summary: `<trig>/probe/summary.txt`. The three valid forms draw no diagnostic anywhere.
 
 **Discovery record (this execution).** It reproduces the AAP's planning discovery with this execution's own logs.
@@ -1366,23 +1379,23 @@ Each category was fixed at the call site with the uniform fix of Section 5.3.7, 
 |---|---|---|---|---|
 | `std::string`/`string_view` from `nullptr` (C++23) | `nullptr-string.txt`: explicit `string` or `string_view` construction from `nullptr` or `NULL`. 1 hit in both trees, `epee::to_hex::string(nullptr)` at `tests/unit_tests/epee_utils.cpp:1193`, which takes a span, not a `std::string`. Implicit conversions are left to the compilers | Error on both: use of the deleted `basic_string(nullptr_t)` and `basic_string_view(nullptr_t)` constructors (C++17: `-Wnonnull` warning only) | No deleted-constructor error; the upstream logs' `nullptr_t` mentions are `operator==(…, nullptr_t)` candidate notes inside the `u8` failures | No |
 | Simpler implicit move breaking a `T&` return (C++23) | `implicit-move.txt`: lvalue-reference returns that take an rvalue-reference parameter, 2 hits (`contrib/epee/include/storages/portable_storage_base.h:121, 128`, which return other expressions), and rvalue-reference variables, 5 hits (default arguments and one `&&` operator). None returns the parameter | Error on both: GCC "cannot bind non-const lvalue reference of type 'int&' to an rvalue of type 'int'", Clang "non-const lvalue reference to type 'int' cannot bind to a temporary of type 'int'" (C++17: none) | No "cannot bind" error | No |
-| Rewritten `==`/`!=` ambiguity (C++20) | `rewritten-eq.txt`: one-parameter member `operator==`/`!=` without `const`. 8 hits in both trees: `tests/unit_tests/expect.cpp:76, 77, 88, 89` and the vendored `easylogging++.h:873, 1623, 1696`, `easylogging++.cc:1592`. None is diagnosed; they stay | GCC "C++20 says that these are ambiguous, even though the second is reversed" (printed without a flag), Clang `-Wambiguous-reversed-operator` (C++17: none) | Neither diagnostic | No |
-| Enum-enum and enum-float arithmetic (C++20) | `enum-arithmetic.txt`: typed search by `typed-search.py`, which `run-search.sh` runs. Step 1, declaration inventory: every enum with a body, each anonymous one its own type, scoped ones marked: 124 in both trees (90 unscoped, 21 of them anonymous; 34 scoped), 659 enumerators. Step 2, expression search: an unscoped enumerator as an operand of an arithmetic, bitwise, relational, equality or `?:` operator in a statement that also holds an enumerator of another enum, a floating literal, `float`, `double` or a name declared `float` or `double`. 10 hits in both trees, each read in its file: same enum 5, C source 4, enum with an integer 1. Reruns with each name-resolution rule off, then all three: 45 more statements in both trees, all read, none an occurrence. Result: 0 different-enum or enum-float operations in either tree. Every line is lexed, with comments and literals blanked, so `#if` branches no build defines, macro bodies and uninstantiated templates are searched too. Operands whose type the text does not show (enum-typed variables, members and function results, `auto`, template parameters, macro expansions) are left to the compilers and the probe. Self-test: `typed-selftest.txt`, 38 checks, 0 failed | `-Wdeprecated-enum-enum-conversion` and `-Wdeprecated-enum-float-conversion` on both (C++17: none) | Neither flag, nor in the logs that compile the Trezor objects: both E candidates (`<run>/logs/build-candE-{gcc,clang}-E.log`) and the depends-built Monero (`<run>/logs/build-depmon-c23.log`). protobuf's own depends build does report it: that is the open blocker in Section 5.2 | No |
-| Comparison of two arrays (C++20) | `array-compare.txt`: typed search by `typed-search.py`. Step 1, declaration inventory of built-in arrays (members, locals, globals, parameters, references to arrays, variables of array typedefs): 1703 declarators upstream, 1704 in the candidate (the new `storage_` member, `src/common/expect.h:145`), 5 array type aliases in each. Step 2, expression search: (a) `==`, `!=`, `<`, `>`, `<=`, `>=` or `<=>` whose two operands, plain names or member chains such as `a.data` and `this->m`, resolve to arrays where they stand, array parameters counting as pointers: 4 hits in both trees, class objects 2, scalars 1, macro parameters 1; (b) the generic `name op name` form restricted to inventory names: 63 hits in both trees, scalars 34, class objects 18, macro parameters 6, a pointer or `std::string` against one array 4, C source 1. Each hit was read in its file. Result: 0 comparisons of two arrays in either tree. `#if` branches no build defines, macro bodies and uninstantiated templates are searched textually; operands typed through `auto`, template parameters, function results or macro expansion are left to the compilers and the probe. Self-test: `typed-selftest.txt` | GCC `-Warray-compare`, which it also reports at C++17; Clang `-Wdeprecated-array-compare` plus `-Wtautological-compare` (C++17: `-Wtautological-compare` only) | Neither `-Warray-compare` nor `-Wdeprecated-array-compare` | No |
-| `std::result_of`, `not1`/`not2`, removed `allocator` members (C++20) | `removed-library.txt` (`result_of`, `\bnot[12]\b`, `allocator<…>::` with the nine removed members): 2 hits in both trees. The commented-out line at `contrib/epee/include/serialization/keyvalue_serialization.h:71` is not compiled and stays; `boost::fusion::result_of` at `contrib/epee/src/http_auth.cpp:636` is Boost's and unaffected | `result_of`: no diagnostic on either compiler with libstdc++ 14, which declares it without deprecation markup, so the search is its only libstdc++ coverage (libc++ 19: error). `not1`/`not2`: `-Wdeprecated-declarations` on both, at C++17 too. `allocator<int>::pointer`, `construct`, `destroy`: errors on both (C++17: none) | None of these diagnostics | No |
+| Rewritten `==`/`!=` ambiguity (C++20) | `rewritten-eq.txt`: one-parameter member `operator==`/`!=` without `const`. Both trees hold the same 10 such operators: `tests/unit_tests/expect.cpp:76, 77, 88, 89` and the vendored `easylogging++.h:873, 1312, 1324, 1623, 1696`, `easylogging++.cc:1592`. The run's `rewritten-eq.txt` lists the other eight and omits `easylogging++.h:1312, 1324`, the `operator==` and `operator!=` of the class template `AbstractRegistry` (base of easylogging++'s `Registry` and `RegistryWithPred`), each taking the one parameter `const AbstractRegistry<T_Ptr, Container>&`. A class-template member is instantiated only where it is used: no expression uses that `operator==`, and its `operator!=` is used only by `m_configurations != configurations` at `easylogging++.cc:755`, which compiles at easylogging++'s own C++11 (Section 5.4.3). None is diagnosed; they stay | GCC "C++20 says that these are ambiguous, even though the second is reversed" (printed without a flag), Clang `-Wambiguous-reversed-operator` (C++17: none) | Neither diagnostic | No |
+| Enum-enum and enum-float arithmetic (C++20) | `enum-arithmetic.txt`: typed search by `typed-search.py`, which `run-search.sh` runs. Its counts and self-test result are this execution's recorded results, not independently verified; independent replay is pending (audit method, pass 3). Step 1, declaration inventory: every enum with a body, each anonymous one its own type, scoped ones marked: 124 in both trees (90 unscoped, 21 of them anonymous; 34 scoped), 659 enumerators. Step 2, expression search: an unscoped enumerator as an operand of an arithmetic, bitwise, relational, equality or `?:` operator in a statement that also holds an enumerator of another enum, a floating literal, `float`, `double` or a name declared `float` or `double`. 10 hits in both trees, each read in its file: same enum 5, C source 4, enum with an integer 1. Reruns with each name-resolution rule off, then all three: 45 more statements in both trees, all read, none an occurrence. Result: 0 different-enum or enum-float operations in either tree. Every line is lexed, with comments and literals blanked, so `#if` branches no build defines, macro bodies and uninstantiated templates are searched too. Operands whose type the text does not show (enum-typed variables, members and function results, `auto`, template parameters, macro expansions) are left to the compilers and the probe. Self-test: `typed-selftest.txt`, 38 checks, 0 failed | `-Wdeprecated-enum-enum-conversion` and `-Wdeprecated-enum-float-conversion` on both (C++17: none) | Neither flag, nor in the logs that compile the Trezor objects: both E candidates (`<run>/logs/build-candE-{gcc,clang}-E.log`) and the depends-built Monero (`<run>/logs/build-depmon-c23.log`). protobuf's own depends build does report it: that is the open blocker in Section 5.2 | No |
+| Comparison of two arrays (C++20) | `array-compare.txt`: typed search by `typed-search.py`. Its counts and self-test result are this execution's recorded results, not independently verified; independent replay is pending (audit method, pass 3). Step 1, declaration inventory of built-in arrays (members, locals, globals, parameters, references to arrays, variables of array typedefs): 1703 declarators upstream, 1704 in the candidate (the new `storage_` member, `src/common/expect.h:145`), 5 array type aliases in each. Step 2, expression search: (a) `==`, `!=`, `<`, `>`, `<=`, `>=` or `<=>` whose two operands, plain names or member chains such as `a.data` and `this->m`, resolve to arrays where they stand, array parameters counting as pointers: 4 hits in both trees, class objects 2, scalars 1, macro parameters 1; (b) the generic `name op name` form restricted to inventory names: 63 hits in both trees, scalars 34, class objects 18, macro parameters 6, a pointer or `std::string` against one array 4, C source 1. Each hit was read in its file. Result: 0 comparisons of two arrays in either tree. `#if` branches no build defines, macro bodies and uninstantiated templates are searched textually; operands typed through `auto`, template parameters, function results or macro expansion are left to the compilers and the probe. Self-test: `typed-selftest.txt` | GCC `-Warray-compare`, which it also reports at C++17; Clang `-Wdeprecated-array-compare` plus `-Wtautological-compare` (C++17: `-Wtautological-compare` only) | Neither `-Warray-compare` nor `-Wdeprecated-array-compare` | No |
+| `std::result_of`, `not1`/`not2`, removed `allocator` members (C++20) | `removed-library.txt` (`result_of`, `\bnot[12]\b`, `allocator<…>::` with the nine removed members): 2 hits in both trees. The commented-out line at `contrib/epee/include/serialization/keyvalue_serialization.h:71` is not compiled and stays; `boost::fusion::result_of` at `contrib/epee/src/http_auth.cpp:636` is Boost's and unaffected | `result_of`: libstdc++ 14.2 marks the `result_of<F(Args...)>` partial specialization `_GLIBCXX17_DEPRECATED_SUGGEST("std::invoke_result")` (`/usr/include/c++/14/type_traits:2673-2676`), a GNU `__deprecated__` attribute from C++17 on (`/usr/include/x86_64-linux-gnu/c++/14/bits/c++config.h:122-124`), yet neither compiler reports a use of it: `std::result_of<F(int)>::type`, `std::result_of_t<F(int)>` and a dependent `typename std::result_of<G(int)>::type` compile without a diagnostic at C++17, C++20 and C++23, also with `-Wdeprecated-declarations` (GCC adding `-Wsystem-headers`, Clang `-Wdeprecated`). With libstdc++ the search is therefore its only coverage (libc++ 19: error; at C++17 `-Wdeprecated-declarations`). `not1`/`not2`: `-Wdeprecated-declarations` on both, at C++17 too. `allocator<int>::pointer`, `construct`, `destroy`: errors on both (C++17: none) | None of these diagnostics | No |
 | `std::wstring_convert` / `codecvt_utf8` (C++17) | `codecvt.txt` (`wstring_convert\|codecvt`): 7 hits in both trees. `external/easylogging++/easylogging++.h:379` (`#include <codecvt>`) and `easylogging++.cc:839` sit inside `#if defined(ELPP_UNICODE)`; the rest are a comment and four `boost::archive::no_codecvt` flags. No CMake file and neither compile database (`<trig>/b/up{23,17}-A/compile_commands.json`) defines `ELPP_UNICODE`, so the code is never compiled and gets no patch | No diagnostic on either compiler with libstdc++ 14, at either standard (libc++ 19: `-Wdeprecated-declarations`, at C++17 too) | Not compiled | No |
 | `throw()` (removed in C++20) | `throw.txt` (`\bthrow[[:space:]]*\(\)`): 4 sites in both trees, `src/blockchain_db/blockchain_db.h:221`, `src/device_trezor/trezor/exceptions.hpp:49, 68` and `src/serialization/json_object.h:77→78` | No diagnostic on either compiler, at either standard | No diagnostic, so the source-edit rule has no trigger and the sites are not edited. `throw()` has meant `noexcept(true)` since C++17, so behaviour is the same either way | Yes: `blockchain_db.h:221`, audited, no trigger, not edited; the other three No |
 
 ### 5.4.2 Files changed per category
 
-**Edits by this execution** (against upstream `454075bc6`, this guide excluded: 27 files, +399/−293; `git diff 454075bc6 ad0dbd181` gives 26 of them, and the three later build-script fixes add `cmake/CheckTrezor.cmake`):
+**Edits by this execution** (against upstream `454075bc6`, this guide excluded: 27 files, +500/−326; `git diff 454075bc6 ad0dbd181` gives 26 of them, and the three later build-script fixes add `cmake/CheckTrezor.cmake`):
 
 | Group | Files |
 |---|---|
 | Build configuration | `CMakeLists.txt` (3.20 minimum at `:31` and `:246→279`, C++23 at `:136-138`, guard at `:150-171` (new), link-test forwarding at `:299-301` (new), `CMP0144` NEW at `:968-973` (new)); `src/crypto/CMakeLists.txt` (`CryptonightR_template.S` declared `LANGUAGE ASM` at `:100→103`, comment `:99→99-102`); `contrib/depends/Makefile:12` (`CXX_STANDARD ?= c++23`); `contrib/depends/toolchain.cmake.in:104` (Darwin `CMAKE_CXX_STANDARD 23`) |
-| Toolchain and CI | `contrib/guix/manifest.scm`; `.github/workflows/build.yml`; `.github/workflows/depends.yml` |
-| Build-script fixes after the acceptance run (pre-existing defects found in review; no C++23 trigger, no standard or compile-flag change; Section 5.4.4) | `CMakeLists.txt` (case-correct `CMakeLists_IOS.txt` include at `:56`, `check_submodule()` at `:422-442`, header-glob comments at `:246` and `:254`); `cmake/CheckTrezor.cmake` (mandatory gate `:27`, probe linker flags `:102-108` and `:119`, readiness after the LibUSB check `:209-226`); `contrib/guix/manifest.scm` (`HOST` checks `:312-313` and `:344-346`) |
-| Documentation | `README.md`; this guide (new file) |
+| Toolchain and CI | `contrib/guix/manifest.scm`; `.github/workflows/build.yml`; `.github/workflows/depends.yml` (both also carry the supply-chain hardening made after the acceptance run, Section 5.4.4) |
+| Build-script fixes and comment corrections after the acceptance run (pre-existing defects found in review; no C++23 trigger, no standard or compile-flag change; Section 5.4.4) | `CMakeLists.txt` (case-correct `CMakeLists_IOS.txt` include at `:56`, `check_submodule()` at `:422-442`, header-glob comments at `:246` and `:254`; comment corrections at `:132` and `:846`); `cmake/CheckTrezor.cmake` (mandatory gate `:27`, probe linker flags `:102-108` and `:119`, readiness after the LibUSB check `:209-226`, whose comment `:209` was corrected); `contrib/guix/manifest.scm` (`HOST` checks `:312-313` and `:344-346`) |
+| Documentation | `README.md` (the plan's rows and prose, `:142-144` and `:162-170`; corrected after the acceptance run, Section 5.4.4: the Dependencies paragraph `:138` and the Fedora packages at `:142` and `:145`); this guide (new file) |
 | `u8` literals | `contrib/epee/src/http_auth.cpp`, `src/rpc/daemon_handler.cpp`, `src/rpc/zmq_pub.cpp`, `tests/unit_tests/http.cpp` (every changed line is listed in the Section 5.4.1 `u8` row) |
 | `[=, this]` | `contrib/epee/include/net/abstract_tcp_server2.inl`, `src/wallet/wallet_rpc_server.cpp`, `tests/net_load_tests/clt.cpp`, `tests/net_load_tests/srv.cpp` |
 | `volatile` | `tests/performance_tests/performance_tests.h` |
@@ -1400,7 +1413,7 @@ Each category was fixed at the call site with the uniform fix of Section 5.3.7, 
 | `contrib/epee/src/http_auth.cpp` | 26 hunks, 52 lines, same line in both (listed in the Section 5.4.1 `u8` row) | Compile error | A, C, Win64, libc++ | GCC A errors at 96-98, 103, 111, 228, 250-251, 344-345, 413, 597, 651, 711, 723, 738-739, 741 (for example "no matching function for call to 'ceref(const char8_t [14])'" at 96, "invalid conversion from 'const char8_t*' to 'const char*'" at 738), and at 118 (`boost::iterator_range` in `md5_::update`), with "required from here" at 250, 367, 405, 487-488, 490-491, 493, 495, 501-502 and 505. Clang C adds 253, 256, 258 and 346 before its error limit. Reversion on GCC: 28 lines error at their own line; 7 (236, 331, 336, 556, 563, 584, 589) error at 118 through a "required from" chain that passes through the line; 15 (487-498, 501-502, 504) error in Boost.Spirit headers "required from here" at the line, or for 504 at 505 in the same statement. **No trigger of its own: 274 and 278.** They are `digest(method, u8":", uri)` and `digest(*a1, u8":", user.server.nonce, u8":", *a2)`, the same `digest(…, u8":", …)` construct that fails at 331 and 336 once instantiated; in the reversion test those two lines error through `md5_::update` at 118 (`summary.txt`). 274 and 278 sit in `old_algorithm` (`:262-263`), a class template the file never instantiates, so GCC and Clang compile each alone with rc 0. Only the source search (audit method pass 3, Section 5.4.1) reaches them, and that pass exists for exactly this case: constructs a compiler reports only when it instantiates them. They are in the plan's `u8` line list | `<trig>/logs/build-up23-A.log`, `<trig>/logs/build-up23-C.log`, `<trig>/u8rev/summary.txt`, `<trig>/u8rev/summary-clang.txt` | No |
 | `src/rpc/daemon_handler.cpp` | 1: 94-120 (27 lines) | Compile error | A, C, Win64, libc++ | GCC A and Win64 error at each of 94-120: "invalid conversion from 'const char8_t*' to 'const char*'". Clang C errors at 94-112 before its error limit: "cannot initialize a member subobject of type 'const char *' with an lvalue of type 'const char8_t[15]'" | `<trig>/logs/build-up23-A.log`, `<trig>/logs/build-up23-C.log`, `<trig>/w64/logs/build-up23.log` | No |
 | `src/rpc/zmq_pub.cpp` | 3: 293-294, 299, 304-305 | Compile error | A, C, Win64, libc++ | Each of 293, 294, 299, 304 and 305 errors in both objects (`obj_rpc_pub`, `obj_daemon_rpc_server`). GCC: "invalid conversion from 'const char8_t*' to 'const char*'". Clang: "cannot initialize a member subobject of type 'const char *const' with an lvalue of type 'const char8_t[21]'" | `<trig>/logs/build-up23-A.log`, `<trig>/logs/build-up23-C.log`, `<trig>/w64/logs/build-up23.log` | No |
-| `tests/unit_tests/http.cpp` | 42 hunks, 105 lines, same line in both (listed in the Section 5.4.1 `u8` row) | Compile error | A, C, libc++ | GCC A errors at 213, 227, 236, 261-262, 264-265, 327, 340, 462-465, 481, 493, 495, 530, 542, 546, 582, 600, 605, 609, 617-618, 630-631, 650, 673, 677, 685-686, 698-699, 758, 793-797, 808, 837, 846, 865-873, 878, 880 and 884 (for example "no matching function for call to '…::push_back(std::pair<const char8_t*, std::__cxx11::basic_string<char> >)'" at 213), with "required from here" at 273. Clang C reports new `-Wstring-compare` keys at 264-265. Reversion on GCC: 51 lines error at their own line. 44 error at the first or last line of their multi-line statement (213, 227, 493, 542, 609, 677, 808, 837). 275 and 279 error through the `qi::parse` call that starts at 273. 511-512 and 562-563 also error alone, though the upstream log does not report them separately. GCC's `-Wunused-function` at `:199` (`write_fields`) follows from the errors in its callers and is not a trigger. **No trigger of its own: 299, 329, 342, 348, 490, 539, 594 and 662.** They are `boost::equals(u8"WWW-authenticate", …)` (299) and the `u8":"` separator of `boost::join` (the other seven). Boost's generic range algorithms accept the `char8_t` array, so GCC and Clang compile each line alone with rc 0. With or without the prefix they compare or append the same byte values, so behaviour is identical. They are in the plan's `u8` line list, and dropping the prefix applies the category's uniform fix to every `u8` string literal of a file that fails to compile | `<trig>/logs/build-up23-A.log`, `<trig>/census/diff-up-C.txt`, `<trig>/u8rev/summary.txt`, `<trig>/u8rev/summary-clang.txt` | No |
+| `tests/unit_tests/http.cpp` | 42 hunks, 105 lines, same line in both (listed in the Section 5.4.1 `u8` row) | Compile error | A, C, libc++ | GCC A errors at 213, 227, 236, 261-262, 264-265, 327, 340, 462-465, 481, 493, 495, 530, 542, 546, 582, 600, 605, 609, 617-618, 630-631, 650, 673, 677, 685-686, 698-699, 758, 793-797, 808, 837, 846, 865-873, 878, 880 and 884 (for example "`no matching function for call to '…::push_back(std::pair<const char8_t*, std::__cxx11::basic_string<char> >)'`" at 213), with "required from here" at 273. Clang C reports new `-Wstring-compare` keys at 264-265. Reversion on GCC: 51 lines error at their own line. 44 error at the first or last line of their multi-line statement (213, 227, 493, 542, 609, 677, 808, 837). 275 and 279 error through the `qi::parse` call that starts at 273. 511-512 and 562-563 also error alone, though the upstream log does not report them separately. GCC's `-Wunused-function` at `:199` (`write_fields`) follows from the errors in its callers and is not a trigger. **No trigger of its own: 299, 329, 342, 348, 490, 539, 594 and 662.** They are `boost::equals(u8"WWW-authenticate", …)` (299) and the `u8":"` separator of `boost::join` (the other seven). Boost's generic range algorithms accept the `char8_t` array, so GCC and Clang compile each line alone with rc 0. With or without the prefix they compare or append the same byte values, so behaviour is identical. They are in the plan's `u8` line list, and dropping the prefix applies the category's uniform fix to every `u8` string literal of a file that fails to compile | `<trig>/logs/build-up23-A.log`, `<trig>/census/diff-up-C.txt`, `<trig>/u8rev/summary.txt`, `<trig>/u8rev/summary-clang.txt` | No |
 | `contrib/epee/include/net/abstract_tcp_server2.inl` | 1: 2059 | New census key | A, C, Win64 | GCC `-Wdeprecated` at `:2059` (A 35, Win64 19). Clang `-Wdeprecated-this-capture` at the member use `:2075` (43), with its note at the capture default `2059:43` | `<trig>/census/diff-up-A.txt`, `<trig>/census/diff-up-C.txt`, `<trig>/census/diff-up-w64.txt`, `<trig>/logs/build-up23-C.log` | No |
 | `src/wallet/wallet_rpc_server.cpp` | 1: 224 (the line's trailing comment on the deprecation goes with it) | New census key | A, C, Win64 | GCC `-Wdeprecated` at `:224` (A 1, Win64 1). Clang `-Wdeprecated-this-capture` at `:225` (1), with its note at `224:36` | `<trig>/census/diff-up-A.txt`, `<trig>/census/diff-up-C.txt`, `<trig>/census/diff-up-w64.txt` | No |
 | `tests/net_load_tests/clt.cpp` | 2: 90, 150 | New census key | A, C | GCC `-Wdeprecated` at `:90` and `:150` (1 each). Clang `-Wdeprecated-this-capture` at `:93` and `:153` (1 each), with notes at `90:87` and `150:87` | `<trig>/census/diff-up-A.txt`, `<trig>/census/diff-up-C.txt` | No |
@@ -1442,19 +1455,35 @@ The four submodules are untouched: `external/gtest` (`52eb8108`), `external/rand
 - **depends dialect.** `CXX_STANDARD ?= c++23` (`contrib/depends/Makefile:12`) reaches every target C++ recipe through `-std=$(CXX_STANDARD)` in the host flags, and `contrib/depends/toolchain.cmake.in:104` sets `CMAKE_CXX_STANDARD 23` for Darwin. No package recipe changed.
 - **README** (`README.md:142-144`, `:162-170`): GCC 13; a new Clang row `16 (Apple Clang 15)`; CMake 3.20; prose naming the enforced minimums (GCC 13, Clang 16, Apple Clang 15/Xcode 15, MinGW-w64 GCC 13 on MSYS2 UCRT64, CMake 3.20), GCC 14.2 (primary) and Clang 19 (secondary) as the CI and acceptance compilers, and the pairing "Clang 18 or 19 with libstdc++ 14 (Boost 1.84 or newer for a warning-clean build)".
 - **Build-script fixes after the acceptance run.** Review found three pre-existing defects in the build scripts, fixed after the run measured `ad0dbd181`. None is a C++23 trigger, none touches `src/`, `contrib/epee/` or `tests/`, and none changes the standard or a compile flag:
-  - `CMakeLists.txt` (+10/−10, line-neutral): `:56` includes `"${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_IOS.txt"`; the old `CmakeLists_IOS.txt` names no file on a case-sensitive filesystem. `check_submodule()` (`:422-442`) runs `${GIT_EXECUTABLE} rev-parse --verify`, checks both exit statuses and reports a submodule up-to-date only for equal, non-empty IDs; otherwise configure stops with Git's error output. A source tree that is not a Git checkout, such as a source archive, prints an explicit skip. The `monero_find_all_headers()` comments (`:246`, `:254`) say that `file(GLOB)` reaches one subdirectory level.
-  - `cmake/CheckTrezor.cmake` (+30/−18): `trezor_fatal_msg` tests the `USE_DEVICE_TREZOR_MANDATORY` option, whose default still comes from the environment variable, so `-D USE_DEVICE_TREZOR_MANDATORY=ON` makes a protobuf, probe, regeneration or requested-LibUSB failure fatal. The protobuf probe receives `CMAKE_TRY_COMPILE_LINKER_FLAGS` (for example Android's `-llog`) as one `LINK_OPTIONS "SHELL:…"` group; the old bare `CMAKE_FLAGS` pair never reached it. `DEVICE_TREZOR_READY` and its definitions are published only after the LibUSB check, so an optional LibUSB failure leaves Trezor disabled. The standard forwarding (`:118`) and the message-regeneration block are unchanged.
+  - `CMakeLists.txt` (+10/−10, line-neutral; with the two comment corrections below, the file is +12/−12 against `ad0dbd181`): `:56` includes `"${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_IOS.txt"`; the old `CmakeLists_IOS.txt` names no file on a case-sensitive filesystem. `check_submodule()` (`:422-442`) runs `${GIT_EXECUTABLE} rev-parse --verify`, checks both exit statuses and reports a submodule up-to-date only for equal, non-empty IDs; otherwise configure stops with Git's error output. A source tree that is not a Git checkout, such as a source archive, prints an explicit skip. The `monero_find_all_headers()` comments (`:246`, `:254`) say that `file(GLOB)` reaches one subdirectory level.
+  - `cmake/CheckTrezor.cmake` (+30/−18, also against `ad0dbd181`, because the comment correction below rewrites one of these added lines): `trezor_fatal_msg` tests the `USE_DEVICE_TREZOR_MANDATORY` option, whose default still comes from the environment variable, so `-D USE_DEVICE_TREZOR_MANDATORY=ON` makes a protobuf, probe, regeneration or requested-LibUSB failure fatal. The protobuf probe receives `CMAKE_TRY_COMPILE_LINKER_FLAGS` (for example Android's `-llog`) as one `LINK_OPTIONS "SHELL:…"` group; the old bare `CMAKE_FLAGS` pair never reached it. `DEVICE_TREZOR_READY` and its definitions are published only after the LibUSB check, so an optional LibUSB failure leaves Trezor disabled; Android, which does not require LibUSB (`:205`), reaches readiness without it. The standard forwarding (`:118`) and the message-regeneration block are unchanged.
   - `contrib/guix/manifest.scm` (+6/−2): the `HOST` dispatch rejects an unset or empty `HOST`, and an unsupported one with an error naming the supported families (`*-mingw32`, `*-linux-gnu*`, `*freebsd*`, `*android*`, `*darwin*`). Valid targets get the same packages as before.
-  - **Evidence.** The fixed tree and the acceptance tree, each configured with the acceptance options, give identical `compile_commands.json` files under the Section 3.2 comparison: configuration A 407/407 entries and E (the CI option set, Trezor mandatory) 453/453, 0 differences. Both E configures log "Trezor: support enabled" and the three checked submodules "up-to-date". The A-E builds, census and test parity measured on `ad0dbd181` (Section 3) therefore hold for the final tree; only the generated version tag differs. Each fix's configure behaviour was checked in its own scenarios: `-D USE_DEVICE_TREZOR_MANDATORY=ON` alone makes a failed Trezor check fatal; an optional LibUSB failure gives "Trezor: support disabled" and no `DEVICE_TREZOR_READY` definition; an IOS configure finds the include; a failing `git rev-parse` stops configure; a tree without `.git` prints the skip. No `guix` binary is available here, so `guix.yml` (human-finish item 1) is the manifest change's first run.
+  - **Evidence.** No acceptance build, test or runtime run covers these fixes: the A-E builds, census and test parity of Section 3 were measured on `ad0dbd181`, and their acceptance for the final tree is **pending** (human-finish item 9 (g)). While this guide was revised, the final tree (these fixes and every later change of this section included) and an `ad0dbd181` copy, each configured (configure only) with the options of A and of E (the CI option set, Trezor mandatory), gave identical `compile_commands.json` files under the Section 3.2 comparison, the final tree as `CAND_*` and the copy as `BASE_*`: configuration A 407/407 entries and E 453/453, 0 differences. Both E configures log "Trezor: support enabled" and the three checked submodules "up-to-date"; the generated version tag differs by construction. That comparison kept no output in `<run>`, is not acceptance evidence and reaches only the success paths of the configure code the fixes change. Also while this guide was revised, and likewise not acceptance evidence, each fix's configure behaviour was checked in its own scenarios: `-D USE_DEVICE_TREZOR_MANDATORY=ON` alone makes a failed Trezor check fatal; an optional LibUSB failure gives "Trezor: support disabled" and no `DEVICE_TREZOR_READY` definition; an IOS configure finds the include; a failing `git rev-parse` stops configure; a tree without `.git` prints the skip. No `guix` binary is available here, so `guix.yml` (human-finish item 1) is the manifest change's first run.
+- **CI workflow supply-chain hardening after the acceptance run.** Review findings on the two workflows were fixed in `.github/workflows/build.yml` and `depends.yml` only, so no input of the local acceptance builds changed; the Section 3 figures remain measurements of `ad0dbd181`, whose acceptance for the final tree is pending (human-finish item 9 (g)):
+  - **Token scope.** Top-level `permissions: contents: read` in both workflows (`build.yml:13-15`, `depends.yml:13-15`), and `persist-credentials: false` on all eight `actions/checkout` steps.
+  - **Actions.** Every external action is pinned to a full commit SHA with its version comment: `actions/checkout`, `actions/cache/restore` and `actions/cache/save` v5.1.0, `actions/upload-artifact` v7.0.1, `msys2/setup-msys2` v2.33.0; the local `set-make-job-count` action is unchanged.
+  - **Images.** `build-linux` and `test-ubuntu` run `${{ matrix.container }}@${{ matrix.digest }}` (`build.yml:163-171`, `:221-224`), `source-archive` runs `ubuntu:22.04@sha256:5ec0…6401` (`:333`), and the depends default is `debian:13@sha256:9cc0…585c` (`depends.yml:34`) behind the unchanged override hook; `build-arch` keeps the rolling `archlinux:latest`.
+  - **Python.** `test-ubuntu` installs the Section 3.1 pinned set, with `pyzmq` in place of the `zmq` shim, and `source-archive` installs `git-archive-all==1.23.1`, each from an inline list with `--require-hashes --only-binary=:all: --no-deps` (`build.yml:245-274`, `:350-357`).
+  - **Toolchain provenance.** The depends step `record toolchain provenance` (`depends.yml:92-105`) lists the installed toolchain packages and fails unless every installed binutils package is the archive's newest candidate. Debian 13's binutils 2.44-3 keeps open advisories (CVE-2025-5244, CVE-2025-8225) with no fixed trixie revision, so the step records that exposure; it does not remove it.
+  - No Actions run has exercised the hardened workflows yet: human-finish item 1.
+- **Comment corrections after the acceptance run.** Review found three CMake comments that misdescribed the code beside them. Only the comment lines changed, so no option, flag, probe or compile command changed; the Section 3 figures remain measurements of `ad0dbd181`, whose acceptance for the final tree is pending (human-finish item 9 (g)):
+  - **Standard defaults** (`CMakeLists.txt:132`): `# First-party targets use strict C11/C++23; external targets may override these defaults.` replaces `# Require C11/C++23 and disable extensions for all targets`; easylogging++, qrcodegen and RandomX keep their own C++11 (Section 5.4.3).
+  - **Clang PIE** (`CMakeLists.txt:846`): `# Clang: request PIE from the linker directly (-Wl,-pie); kept only if the linker-flag probe accepts it` replaces `# Clang does not support -pie flag`, which is false for Clang 19; the flag logic at `:845-850` is unchanged.
+  - **Trezor readiness** (`cmake/CheckTrezor.cmake:209`): `# Publish readiness after the dependency checks required for this platform:` replaces wording that omitted the Android exception at `:205`.
+  - **Evidence.** The configure-only comparison of the final tree in the build-script-fixes bullet above covers these lines (A 407/407, E 453/453 entries, 0 differences); it is not acceptance evidence.
+- **README corrections after the acceptance run.** Review found three statements in the build-requirements section of `README.md` that did not match the build or the packages. The corrections (+23/−23 against `ad0dbd181`) keep the file at 688 lines, `README.md:142-144` and `:162-170` still hold the rows and prose of the README bullet above, and `README.md` is no input of any build:
+  - **Dependency selection** (`:138`). The Dependencies paragraph promised that a missing system library falls back to vendored sources, and that static builds use them. It now says that required libraries must be installed or come from the `depends` prefix, and that a missing one stops configure; that GTest, the only entry marked YES under "Vendored", is always built from `external/gtest` when `BUILD_TESTS=ON`; and that static builds need `.a` archives, which `depends` builds.
+  - **Fedora packages.** `gcc-c++` for GCC (`:142`), the package that ships `g++`, and `pkgconf-pkg-config` for pkg-config (`:145`), the package that ships the `pkg-config` executable that `find_package(PkgConfig REQUIRED)` needs; the Fedora column is one character wider on all 21 table lines.
+
 
 ### 5.4.5 Toolchain pins and CI compiler matrix
 
-**depends on `debian:13`** (`depends.yml:27-29`). Debian 13 supplies GCC 14.2.0 [S1] as both native and target compiler on every GCC host:
+**depends on `debian:13`** (`depends.yml:31-34`). Debian 13 supplies GCC 14.2.0 [S1] as both native and target compiler on every GCC host:
 
-- RISCV64 `g++-riscv64-linux-gnu`, ARM v8 `g++-aarch64-linux-gnu` and i686 `g++-multilib`, all Debian 4:14.2.0-1 [S2] [S3] [S4]; x86_64 Linux `build-essential`; Win64 `g++-mingw-w64-x86-64`, which pulls in the posix variant [S5] (`g++-mingw-w64-x86-64-posix` 14.2.0-19+27+b1 in this run's Win64 build, Section 5.3.9), plus the existing posix `update-alternatives` step (`:116-120`). The RISCV64 `ubuntu:26.04` and Win64 `ubuntu:24.04` overrides are gone.
-- Cross-Mac uses Debian's `clang-19 lld-19` 1:19.1.7-3 [S6] [S7] through the kept `/usr/lib/llvm-19/bin` `PATH` line (`:84`); the apt.llvm.org source lines and key download are removed. FreeBSD uses `clang`, which is Clang 19 on Debian 13 [S8]. Android stays on NDK r27c Clang 18.0.1 [S9] [S10].
+- RISCV64 `g++-riscv64-linux-gnu`, ARM v8 `g++-aarch64-linux-gnu` and i686 `g++-multilib`, all Debian 4:14.2.0-1 [S2] [S3] [S4]; x86_64 Linux `build-essential`; Win64 `g++-mingw-w64-x86-64`, which pulls in the posix variant [S5] (`g++-mingw-w64-x86-64-posix` 14.2.0-19+27+b1 in this run's Win64 build, Section 5.3.9), plus the existing posix `update-alternatives` step (`:136-140`). The RISCV64 `ubuntu:26.04` and Win64 `ubuntu:24.04` overrides are gone.
+- Cross-Mac uses Debian's `clang-19 lld-19` 1:19.1.7-3 [S6] [S7] through the kept `/usr/lib/llvm-19/bin` `PATH` line (`:89`); the apt.llvm.org source lines and key download are removed. FreeBSD uses `clang`, which is Clang 19 on Debian 13 [S8]. Android stays on NDK r27c Clang 18.0.1 [S9] [S10].
 - The native `gcc`/`g++` names stay **unsuffixed**: the Boost recipe passes `$(build_CC)` to `bootstrap.sh --with-toolset` and into `user-config.jam` (`contrib/depends/packages/boost.mk:21, 32, 36`), and a suffixed `gcc-14` fails there with `rule "gcc-14.init" unknown`. This run's depends check confirms the mechanism: with `$ACC_ENV/shim` first on `PATH`, `make print-build_CXX` prints `g++`, which resolves to GCC 14.2.0.
-- **Cache.** Correctness comes from depends' build IDs, which fold every compiler's `--version` into each package ID (`contrib/depends/Makefile:100-116`). The outer key hashes the recipe files only, and the save step runs only on a primary-key miss. The new prefix `depends-cxx23-debian13-` (`depends.yml:114-115`) therefore opens a fresh bucket, so the GCC 14.2 artefacts get saved.
+- **Cache.** Correctness comes from depends' build IDs, which fold every compiler's `--version` into each package ID (`contrib/depends/Makefile:100-116`). The outer key hashes `contrib/depends/packages/*`, `contrib/depends/Makefile`, `contrib/depends/hosts/*` and `contrib/depends/toolchain.cmake.in` (`depends.yml:134`), none of which identifies the container image or the version of any compiler it supplies, and the save step runs only on a primary-key miss outside pull requests (`depends.yml:152-157`). The new prefix `depends-cxx23-debian13-` (`depends.yml:134-135`) therefore opens a fresh bucket, so the GCC 14.2 artefacts get saved. This change set also edits two of the hashed files (`contrib/depends/Makefile:12`, `contrib/depends/toolchain.cmake.in:104`), so the hash changes too, but only the prefix keeps `restore-keys` from matching a bucket filled before the move to `debian:13`.
 - No file under `contrib/depends/hosts`, `builders` or `packages` changed.
 
 **Guix `gcc-14.2` variant** (`contrib/guix/manifest.scm:85-93`). The pinned channel `0c2eff26` packages `gcc-14` as 14.3.0 and `gcc-15` as 15.2.0 [S11], so 14.2.0 exists only through this variant:
@@ -1480,9 +1509,9 @@ The four submodules are untouched: `external/gtest` (`52eb8108`), `external/rand
 | `build.yml` `build-macos` (`macOS-latest`) | Apple Clang 21.0.0 (Xcode 26.4.1, rolling, read 2026-10-03; on 2026-10-04 the macOS 26 image lists Xcode 26.6 as default, also Apple Clang 21.0.0) | unchanged | [S13] [S14] [S15] |
 | `build.yml` `build-windows` (MSYS2 UCRT64) | MinGW-w64 GCC 16.2.0 (rolling) | unchanged | [S16] |
 | `build.yml` `build-arch` | GCC 16.2.1 (rolling) | unchanged | [S17] |
-| `build.yml` `build-linux` Debian 13 | GCC 14.2.0-19, selected by `CC: gcc-14`, `CXX: g++-14` (`build.yml:165-166`) | Debian 11 job | [S1]; before: `f7c9079e7` `build.yml:156` |
-| `build.yml` `build-linux` Ubuntu 24.04 | GCC 14.2.0-4ubuntu2~24.04.1 (`g++-14` in `APT_INSTALL_LINUX`, `build.yml:18`) | Ubuntu 22.04 job | [S18]; before: `f7c9079e7` `build.yml:159` |
-| `build.yml` `test-ubuntu` (`ubuntu:24.04`) | GCC 14.2.0 (`build.yml:217-218`), including the pull-request `core_tests` `--fresh` reconfigure | GCC 13.3.0 | [S18]; before: [S19], `f7c9079e7` `build.yml:207` |
+| `build.yml` `build-linux` Debian 13 | GCC 14.2.0-19, selected by `CC: gcc-14`, `CXX: g++-14` (`build.yml:175-176`) | Debian 11 job | [S1]; before: `f7c9079e7` `build.yml:156` |
+| `build.yml` `build-linux` Ubuntu 24.04 | GCC 14.2.0-4ubuntu2~24.04.1 (`g++-14` in `APT_INSTALL_LINUX`, `build.yml:22`) | Ubuntu 22.04 job | [S18]; before: `f7c9079e7` `build.yml:159` |
+| `build.yml` `test-ubuntu` (`ubuntu:24.04`) | GCC 14.2.0 (`build.yml:229-230`), including the pull-request `core_tests` `--fresh` reconfigure | GCC 13.3.0 | [S18]; before: [S19], `f7c9079e7` `build.yml:207` |
 | `build.yml` `build-docker` | StageX GCC 15.2.0 (`Dockerfile:1`, digest-pinned) | unchanged | [S20] |
 | `build.yml` `source-archive` | none (compiles nothing) | — | — |
 | `depends.yml` RISCV64 | Native and target GCC 14.2.0 (`debian:13`) | Native and target GCC 15.2 (`ubuntu:26.04`) | [S1] [S2]; before: [S21], `f7c9079e7` `depends.yml:39` |
@@ -1589,13 +1618,14 @@ Each external fact in Sections 5.4.5-5.4.7 carries the tag of its primary source
 
 # 6. Risk Assessment
 
-These are forward-looking exposures for whoever takes this branch to production. Consensus, serialization, wire, storage and RPC behaviour were exercised at both standards with identical results (Sections 3 and 4), so they carry no residual risk from the dialect change, with one exception: among the wire formats, the certificate-pin lookup has no behaviour evidence yet, and its check is pending (Section 3.5; row below).
+These are forward-looking exposures for whoever takes this branch to production. Consensus, serialization, wire, storage and RPC behaviour were exercised at both standards with identical results on `ad0dbd181` (Sections 3 and 4), so they carry no residual risk from the dialect change, with one exception: among the wire formats, the certificate-pin lookup has no behaviour evidence yet, and its check is pending (Section 3.5; row below). Acceptance of the final revision is pending (human-finish item 9 (g); row below).
 
 | Risk | Category | Severity | Probability | Mitigation | Status |
 |---|---|---|---|---|---|
-| CI has not run on the candidate. Platform-only code (`_WIN32`, `__APPLE__`, FreeBSD, Android) is compiled only by CI, with MSYS2 GCC 16.2, Apple Clang 21, Arch GCC 16.2.1, StageX GCC 15.2.0, Guix GCC 14.2.0 and Clang 22, and NDK Clang 18.0.1 | Technical | High | Medium | Push the change set and confirm every job (Section 5.3.10; human-finish item 1) | Open |
+| CI has not run on the candidate. The `__APPLE__`, FreeBSD and Android paths are compiled only by CI, and native Windows only by CI's MSYS2 job; locally, only the Debian 13 MinGW-w64 cross build compiled the `_WIN32` code of the 13 Windows executables, with no tests built and nothing run (Section 5.3.9). Only CI compiles with MSYS2 GCC 16.2, Apple Clang 21, Arch GCC 16.2.1, StageX GCC 15.2.0, Guix GCC 14.2.0 and Clang 22, and NDK Clang 18.0.1 | Technical | High | Medium | Push the change set and confirm every job (Section 5.3.10; human-finish item 1) | Open |
 | protobuf 21.12 adds 35 deprecation keys (105 instances) to every depends package build at C++23 | Integration | Medium | Certain | The owner chooses among the options in Section 5.2; no remedy is applied meanwhile | Open blocker |
 | The certificate-pin lookup (`fingerprint_less` in the sort and binary search, `contrib/epee/src/net_ssl.cpp:211`, `:394`) has no behaviour evidence at either standard, because no test in the tree supplies a non-empty pin list | Technical | Medium | Low | Run the pending positive/negative unsorted-pin handshake check in both twins (Section 3.5; human-finish item 9) | Open |
+| The acceptance results were measured on `ad0dbd181`; no acceptance build, test or runtime run covers the final revision, whose three build-script fixes change configure paths (the Trezor mandatory gate, `check_submodule()`, the IOS include); its CI hardening, comment corrections and README corrections change no input of the local acceptance builds | Technical | Medium | Low | Repeat the acceptance run on the final revision (human-finish item 9 (g)) | Open |
 | The Guix jobs build GCC 14.2.0 from source because no substitutes exist for the variant, which may exceed the runner's time limit | Operational | Medium | Medium | Watch the first run; reproduce a timed-out job on a self-hosted Guix machine with `contrib/guix/guix-build` | Open |
 | The Windows log line at `src/daemon/main.cpp:119` still prints a pointer value, as at C++17. Logging the path as text would need `utf16_to_utf8`, which can throw (`contrib/epee/src/string_tools.cpp:216-231`) | Technical | Low | Certain | Owner decision (human-finish item 6) | Open decision |
 | The Apple Clang 15 and MinGW-w64 GCC 13 floors are enforced and published without a build behind them | Technical | Medium | Medium | Run one pinned Xcode 15 configure and build, and one MSYS2 build with a GCC 13 toolchain where available. If either fails, diagnose it: fix a C++23 incompatibility in the tree at its call site under the source-edit rule (Appendix G), with the uniform fix from the triage table of Section 5.3.7, Step 4.3; record a failure that rule cannot resolve in scope as an open acceptance blocker (Section 5.2) for the owner's scope decision. The floors and the guard (`CMakeLists.txt:150-171`) stay unchanged (Section 5.3.7, Step 4.4) | Open |
@@ -1609,17 +1639,18 @@ These are forward-looking exposures for whoever takes this branch to production.
 Progress against the migration scope and its path to production. Completed = Dark Blue `#5B39F3`; Remaining = White `#FFFFFF`.
 
 ```mermaid
-pie title Project Hours Breakdown — 180 Total
+%%{init: {"theme": "base", "themeVariables": {"pie1": "#5B39F3", "pie2": "#FFFFFF", "pieOpacity": "1", "pieStrokeColor": "#5B39F3", "pieOuterStrokeColor": "#5B39F3", "pieSectionTextColor": "#000000"}}}%%
+pie title Project Hours Breakdown — 186 Total
     "Completed Work" : 147
-    "Remaining Work" : 33
+    "Remaining Work" : 39
 ```
 
-Remaining work by category, in hours (sums to 33):
+Remaining work by category, in hours (sums to 39):
 
 ```mermaid
-pie title Remaining Work by Category — 33 Hours
+pie title Remaining Work by Category — 39 Hours
     "CI confirmation on the pushed commit" : 8
-    "Pending acceptance checks" : 10
+    "Pending acceptance checks" : 16
     "depends verifier decision" : 1
     "protobuf decision and depends re-run" : 4
     "Guix build-time watch" : 4
@@ -1628,23 +1659,23 @@ pie title Remaining Work by Category — 33 Hours
     "Clang and Boost 1.83 decision" : 1
 ```
 
-Remaining work by priority, in hours (sums to 33):
+Remaining work by priority, in hours (sums to 39):
 
 ```mermaid
-pie title Remaining Work by Priority — 33 Hours
-    "High" : 23
+pie title Remaining Work by Priority — 39 Hours
+    "High" : 29
     "Medium" : 7
     "Low" : 3
 ```
 
 | View | Completed | Remaining | Total |
 |---|---|---|---|
-| Hours | 147 | 33 | 180 |
-| Share | 81.7% | 18.3% | 100% |
+| Hours | 147 | 39 | 186 |
+| Share | 79.0% | 21.0% | 100% |
 
 # 8. Summary & Recommendations
 
-The migration is complete in the tree and demonstrated on Linux. Twenty-seven files changed against upstream `454075bc6`, +399/−293 lines, and this guide is added. Three of the changes, fixes of pre-existing build-script defects found in review (the `CMakeLists_IOS.txt` include, `check_submodule()` and header-glob comments in `CMakeLists.txt`; the mandatory gate, probe linker flags and readiness order in `cmake/CheckTrezor.cmake`; the `HOST` check in `contrib/guix/manifest.scm`), landed after the acceptance run on `ad0dbd181` and leave every compile command unchanged (Section 5.4.4). Every first-party C++ translation unit compiles as C++23 on GCC 14.2 and Clang 19, in Release and Debug and with the CI option set, with zero errors. Against the same commit built as C++17, configurations A and E (GCC) and Monero built through the depends toolchain show no new diagnostic key; the same result for B, C, D and E (Clang) is unverified until their census is recomputed with the corrected script (human-finish item 9). B, D and E also await their twin compile-database confirmation, and the depends twins a rebuild with distinct `BUILD_ID_SALT` values, before those results are accepted. CMake 3.20.6 configures the tree cleanly, the configure-time link-test project now compiles at the root standard, and the compiler floors refuse what they should and accept what they should. The project is at 81.7%: 147 of 180 hours, with 33 hours remaining.
+The migration is complete in the tree and was demonstrated on Linux at `ad0dbd181`. Twenty-seven files changed against upstream `454075bc6`, +500/−326 lines, and this guide is added. Three of the changes, fixes of pre-existing build-script defects found in review (the `CMakeLists_IOS.txt` include, `check_submodule()` and header-glob comments in `CMakeLists.txt`; the mandatory gate, probe linker flags and readiness order in `cmake/CheckTrezor.cmake`; the `HOST` check in `contrib/guix/manifest.scm`), landed after the acceptance run on `ad0dbd181`, as did the CI workflow supply-chain hardening, three CMake comment corrections and the README build-requirements corrections; a configure-only comparison of the final tree made while revising this guide found the A and E compile databases unchanged (407/407 and 453/453 entries, 0 differences), but it is not acceptance evidence, and acceptance of the final revision is pending (human-finish item 9 (g); Section 5.4.4). On `ad0dbd181`, every first-party C++ translation unit compiles as C++23 on GCC 14.2 and Clang 19, in Release and Debug and with the CI option set, with zero errors. Against that commit built as C++17, configurations A and E (GCC) and Monero built through the depends toolchain show no new diagnostic key; the same result for B, C, D and E (Clang) is unverified until their census is recomputed with the corrected script (human-finish item 9). B, D and E also await their twin compile-database confirmation, and the depends twins a rebuild with distinct `BUILD_ID_SALT` values, before those results are accepted. On `ad0dbd181`, CMake 3.20.6 configures the tree cleanly, the configure-time link-test project compiles at the root standard, and the compiler floors refuse what they should and accept what they should. The project is at 79.0%: 147 of 186 hours, with 39 hours remaining.
 
 What matters most for a consensus-bearing codebase is that nothing moved, and that was measured rather than assumed:
 
@@ -1653,11 +1684,11 @@ What matters most for a consensus-bearing codebase is that nothing moved, and th
 - a blockchain database and a wallet written by the C++17 build open in the C++23 build with the same height, top-block hash, address and view key;
 - every edited string literal differs from its predecessor only by the removed `u8` prefix, and the one Windows-only fix keeps the exact C++17 log output.
 
-One acceptance criterion is not met, and it is not in Monero's code. protobuf 21.12, compiled by its unmodified depends recipe at C++23, adds 35 deprecation keys to the package builds. Every remedy needs an authorization the request does not give, so the guide reports it and applies none. A second open blocker sits in the acceptance procedure itself: the depends verifier's C-recipe item cannot pass with the recipes unchanged, so the depends twins cannot be accepted until the owner decides on it (Section 5.2). Everything else that remains is the five pending acceptance checks and the census recomputation of item 9, verification only CI can give, and owner decisions. **Production readiness: not yet.** Run the pending acceptance checks and recompute the census, push the change set and confirm every workflow, decide on the protobuf blocker and on the depends verifier item, and watch the first Guix run. With those four done and green, the branch is ready to merge.
+One acceptance criterion is not met, and it is not in Monero's code. protobuf 21.12, compiled by its unmodified depends recipe at C++23, adds 35 deprecation keys to the package builds. Every remedy needs an authorization the request does not give, so the guide reports it and applies none. A second open blocker sits in the acceptance procedure itself: the depends verifier's C-recipe item cannot pass with the recipes unchanged, so the depends twins cannot be accepted until the owner decides on it (Section 5.2). Everything else that remains is item 9 (its six pending acceptance checks, first among them the acceptance run repeated on the final revision, and its census recomputation), verification only CI can give, and owner decisions. **Production readiness: not yet.** Repeat the acceptance run on the final revision with the pending checks and the census recomputation, push the change set and confirm every workflow, decide on the protobuf blocker and on the depends verifier item, and watch the first Guix run. With those four done and green, the branch is ready to merge.
 
 ## Human-finish items
 
-1. **Push the change set and check every workflow on that commit** (Section 3.6): every `build.yml` job, the ten `depends.yml` hosts, `guix.yml` `cache-sources`, its eight `build-guix` targets and `bundle-logs` with its hash summary, and the push-event full-iteration `core_tests`. Only CI exercises Apple Clang 21 with the macOS SDK's libc++, MSYS2 GCC 16.2, Arch GCC 16.2.1, StageX GCC 15.2.0, Guix GCC 14.2.0 and Clang 22, NDK Clang 18.0.1, Debian 13's cross compilers other than MinGW-w64, and the `_WIN32`, `__APPLE__`, FreeBSD and Android paths. *8 h, High.*
+1. **Push the change set and check every workflow on that commit** (Section 3.6): every `build.yml` job, the ten `depends.yml` hosts, `guix.yml` `cache-sources`, its eight `build-guix` targets and `bundle-logs` with its hash summary, and the push-event full-iteration `core_tests`. Only CI exercises Apple Clang 21 with the macOS SDK's libc++, MSYS2 GCC 16.2, Arch GCC 16.2.1, StageX GCC 15.2.0, Guix GCC 14.2.0 and Clang 22, NDK Clang 18.0.1, Debian 13's cross compilers other than MinGW-w64, the `__APPLE__`, FreeBSD and Android paths, and the `_WIN32` paths natively (MSYS2 build, reduced tests and runtime). The local Win64 cross build (Section 5.3.9) compiled the `_WIN32` code of the 13 Windows executables but built no tests and ran nothing. *8 h, High.*
 2. **Decide on protobuf 21.12's C++23 warnings** in the depends package builds (Section 5.2): a recipe-local `-std=c++17`, a source patch, a newer protobuf, or accepting the delta as outside criterion 3. Then re-run the depends twins as Section 3.3 describes, with distinct `BUILD_ID_SALT` values. *4 h, High.*
 3. **Make the scope decision for any frozen-directory regression** the boundary cannot fix. None was found in this run. *0 h.*
 4. **Watch the Guix build time.** No substitutes exist for the `gcc-14.2` variant, so each `build-guix` job also builds GCC 14.2.0. If a job hits its limit, reproduce it on a self-hosted machine with `contrib/guix/guix-build` and record the result. *4 h, Medium.*
@@ -1665,7 +1696,7 @@ One acceptance criterion is not met, and it is not in Monero's code. protobuf 21
 6. **Confirm the Windows-only log line at `src/daemon/main.cpp:117-119`** on MSYS2 UCRT64 (Section 5.3), including its error branch. It prints the pointer value, exactly as at C++17. The user's commit `429a20174`, which logged the path through `utf16_to_utf8`, was reverted with the earlier pass; re-landing it changes the log text, and `utf16_to_utf8` can throw `std::runtime_error` (`contrib/epee/src/string_tools.cpp:216-231`), which the pointer output cannot. Neither version escapes control bytes or catches exceptions. Decide which to keep. *3 h, Medium.*
 7. **Decide on the two toolchains outside the pins:** StageX GCC 15.2.0 in the `Dockerfile`, and Android NDK r27c Clang 18.0.1. *2 h, Low.*
 8. **Decide on Clang + system Boost 1.83** for Ubuntu and Debian developers who build with Clang: the remedy is Boost 1.84 or newer. *1 h, Low.*
-9. **Run the pending acceptance checks.** Configurations A-F, the depends twins, test parity, the contract checks (Section 3) and the Clang 19 `b2` build of Boost (Section 5.4.6) were run in this execution, but five checks the plan requires were not, and one census must be recomputed, so the results they qualify stand as measured and are not yet accepted: (a) the certificate-pin lookup, the wire-format check the plan names as `ssl_handshake_fingerprint_lookup`, in both twins of A and C (replay in Section 3.5); (b) the compile-database confirmation for the B, D, E (GCC) and E (Clang) twins, on which their census acceptance waits (Section 3.2); (c) both depends twins rebuilt in new copies with distinct `BUILD_ID_SALT` values as well as the host salts, then `verify`, every item of which except (iv) must pass, `native_protobuf`'s missing `-std` and the supplementary C-recipe check (iv-s) included, and the package census and the depends-built Monero census (Section 3.3); item (iv) fails by construction and is open acceptance blocker 3 (item 10); (d) the libc++ pass over all 299 C++ entries of configuration C, adding the three this run skipped (Section 3.3); (e) the `core_tests` `REPORT:` and functional `Done,` cross-checks and the functional section scoping, over the retained logs (Section 3.4); (f) the census of B, C, D, E (Clang) and the depends package builds, recomputed by re-reading the retained `<run>/logs` build logs with the corrected script of Section 5.3.8, Step 5.5 (Appendix A, "Warning census"), with no rebuild; until then their zero-new-key results, and "no new key outside protobuf" for the package builds, are unverified (Section 3.3). *10 h, High.*
+9. **Run the pending acceptance checks.** Configurations A-F, the depends twins, test parity, the contract checks (Section 3) and the Clang 19 `b2` build of Boost (Section 5.4.6) were run in this execution on `ad0dbd181`, but six checks the plan requires were not, (a)-(e) and (g), and one census, (f), must be recomputed, so the results they qualify stand as measured and are not yet accepted: (a) the certificate-pin lookup, the wire-format check the plan names as `ssl_handshake_fingerprint_lookup`, in both twins of A and C (replay in Section 3.5); (b) the compile-database confirmation for the B, D, E (GCC) and E (Clang) twins, on which their census acceptance waits (Section 3.2); (c) both depends twins rebuilt in new copies with distinct `BUILD_ID_SALT` values as well as the host salts, then `verify`, every item of which except (iv) must pass, `native_protobuf`'s missing `-std` and the supplementary C-recipe check (iv-s) included, and the package census and the depends-built Monero census (Section 3.3); item (iv) fails by construction and is open acceptance blocker 3 (item 10); (d) the libc++ pass over all 299 C++ entries of configuration C, adding the three this run skipped (Section 3.3); (e) the `core_tests` `REPORT:` and functional `Done,` cross-checks and the functional section scoping, over the retained logs (Section 3.4); (f) the census of B, C, D, E (Clang) and the depends package builds, recomputed by re-reading the retained `<run>/logs` build logs with the corrected script of Section 5.3.8, Step 5.5 (Appendix A, "Warning census"), with no rebuild; until then their zero-new-key results, and "no new key outside protobuf" for the package builds, are unverified (Section 3.3); (g) the acceptance run repeated on the final revision, the pushed head commit of item 1: configurations A-F with their C++17 twins and census, the depends twins, test parity on A and C with `core_tests`, the contract checks, the runtime and on-disk interchange checks, the guard and link-test probes, the Win64 cross build and the libc++ pass, each log and census named under a new `<run>` together with that revision's `git rev-parse` output; checks (a)-(f) run on that revision. Until then every result in Sections 3 and 4 is a measurement of `ad0dbd181`, and final-candidate acceptance is **pending**. *16 h, High.*
 10. **Decide on the depends verifier's C-recipe item** (Section 5.2, open acceptance blocker 3): accept the supplementary check (iv-s) in place of item (iv) for `openssl`, `hidapi` and ncurses' two helpers, authorize recipe edits, or accept the depends check without the item. No rebuild clears it with the recipes unchanged, so the depends twins are not accepted until then. *1 h, High.*
 
 # 9. Development Guide
@@ -1949,7 +1980,7 @@ check_build $? "$RUN/logs/build-cand-A.log"         # stops unless Ninja exited 
 
 Expect `-- CMake version 3.28.3`, `-- The CXX compiler identification is GNU 14.2.0`, `-- Found Boost Version: 1.91.0`, and `[465/465]` with no `: error:` line. With Trezor enabled (configuration E) expect `Trezor: support enabled`. Configure prints one benign `CMake Warning`, "Manually-specified variables were not used by the project", listing `Boost_NO_SYSTEM_PATHS` and `EXPECT_FUNCTIONAL_TESTS` (under CMake 3.20.6 also `BOOST_ROOT`). The Boost config package does not read the hints, and `EXPECT_FUNCTIONAL_TESTS` is read only when a Python module is missing (`tests/functional_tests/CMakeLists.txt:66`).
 
-The compilation database is the reliable way to see what the macro-generated serialization code and the `.inl` bodies expand to:
+The compilation database records compiler invocations, not code. Each entry names a translation unit's `file`, its `output` object, the `directory` the compile runs in and the exact compiler `command`, with every definition, include path and flag, the `-std=` the unit receives included. To see what the macro-generated serialization code and the `.inl` bodies expand to, run an entry's `command` from its `directory` with `-E` in place of `-c` and `-o <object>`: it prints the translation unit after macro expansion, with the `.inl` files it includes inlined; templates appear as written, never instantiated. The block below counts the entries and the `-std=` each receives:
 
 ```bash
 # After the preamble
@@ -2022,7 +2053,7 @@ check_absent 'Policy CMP' "$RUN/logs/cfg-F-E-gcc.log" "$RUN/logs/cfg-F-E-clang.l
 
 - Under CMake 3.20-3.26 Clang receives `-std=c++2b`; GCC and CMake 3.28's Clang receive `-std=c++23`. Both spell C++23.
 - Clang 16 must use the libstdc++ 13 headers; with libstdc++ 14 it fails. That pairing is documented as unsupported.
-- Build directories belong outside the checkout. `.gitignore` covers only `/build`.
+- Build directories belong outside the checkout. The root `.gitignore` names two CMake build directories and ignores them whole: `/build` at the top level (`.gitignore:3`) and `cmake-build-debug/` at any depth (`.gitignore:67`). In a build directory with another name, such as `out/`, it ignores the CMake outputs `CMakeCache.txt`, `CMakeFiles`, `cmake_install.cmake`, `install_manifest.txt` and `compile_commands.json` (`.gitignore:63-66, 68`) and patterns such as `*.o`, `*.a`, `bin/` and `*.log`, but not Ninja's `build.ninja`, `.ninja_log` and `.ninja_deps`, the `CTestTestfile.cmake` files, `version.cpp`, the copied `tests/data` or the test executables, so those show as untracked.
 
 ### Running the tests
 
@@ -2060,48 +2091,174 @@ HOME="$RUN/runs/cand-core-gcc/corehome" ctest --test-dir "$RUN/b/cand-core-gcc" 
 
 ### Running the software
 
-Never point a node at mainnet. This session uses testnet in offline mode, binds only to loopback, requires digest credentials, and keeps its data in a throwaway directory:
+Never point a node at mainnet. The script below runs `monerod` and `monero-wallet-rpc` on testnet, offline, and fails closed, applying the design of the Section 5.3.8 smoke test (Step 5.4) to both servers:
+
+- **Data.** It creates a new, empty directory with `mktemp -d`, and deletes only that directory, only on a passing run, after both servers have exited with status 0.
+- **Ports.** It picks a random five-port block between 20000 and 27999, below Linux's default ephemeral range (32768-60999) and clear of every fixed port in Appendix B: P2P on P, RPC on P+1, ZMQ RPC on P+2, P+3 spare, wallet RPC on P+4. It uses a block only if P, P+1, P+2 and P+4 all refuse a connection. After five occupied blocks it stops.
+- **Interfaces.** Every server binds to `127.0.0.1` only.
+- **Logins and ownership.** Each server gets its own login, generated for this run from `/dev/urandom`; the wallet server reaches the node with the node's login (`--daemon-login`). Before anything else goes to a server, a request without its login must get HTTP 401 and one with it must succeed while the process this run started is alive. Only then may that server receive `create_wallet`, `stop_wallet` or `stop_daemon`.
+- **Bounds.** Each start-up waits at most 90 s, checking every second that its process is still running, and fails as soon as it is not. Every `curl` has `--max-time`, and the ZMQ client gives up after 10 s.
+- **Clean-up.** An `EXIT` trap, which `INT`, `TERM` and `HUP` also reach, stops the wallet server with `stop_wallet` (only once it is owned and a wallet is open), then the node with `stop_daemon` (only once it is owned). A server that is not owned, or still runs afterwards, gets `TERM`, then `KILL` after 30 s, sent only to the PID this run recorded for it; the trap then waits for each. A script started with `&` by another non-interactive shell inherits `INT` as ignored, which Bash cannot trap, so stop such a run with `TERM`.
 
 ```bash
 # After the preamble
-P=22630   # base of a five-port block: P, P+1, P+2 and P+4 must be free
-D=$(mktemp -d)
-"$RUN/b/cand-A/bin/monerod" --testnet --offline --no-igd --non-interactive --data-dir "$D/node" \
-  --p2p-bind-ip 127.0.0.1 --p2p-bind-port $P \
-  --rpc-bind-ip 127.0.0.1 --rpc-bind-port $((P+1)) \
-  --zmq-rpc-bind-ip 127.0.0.1 --zmq-rpc-bind-port $((P+2)) \
-  --rpc-login user:pass --log-file "$D/monerod.log" > /dev/null 2>&1 &
+# Testnet offline session: each server is used only after it proves it is the process this run started.
+set -euo pipefail
+MONEROD=$RUN/b/cand-A/bin/monerod WALLET_RPC=$RUN/b/cand-A/bin/monero-wallet-rpc
+D= P= MURL= WURL= MPID= WPID= MCRED= WCRED= OUT= M_OWNED=0 W_OWNED=0 W_OPEN=0 PASSED=0
+fail() { echo "session: $*" >&2; exit 1; }
+gone() {    # gone <pid> <seconds>: true once the PID has exited, false if it still runs after <seconds>
+  local _
+  for _ in $(seq "$2"); do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done
+  ! kill -0 "$1" 2>/dev/null
+}
+halt() {    # halt <pid>: TERM, then KILL after 30 s, then reap; only ever a PID this run started
+  if kill -0 "$1" 2>/dev/null; then kill "$1" 2>/dev/null; gone "$1" 30 || kill -KILL "$1" 2>/dev/null; fi
+  wait "$1" 2>/dev/null
+}
+finish() {
+  local rc=$?
+  set +e; trap '' INT TERM HUP    # a second signal cannot cut the clean-up short
+  if [ -n "$WPID" ]; then    # the wallet server first: it holds the open wallet and talks to the node
+    if [ "$W_OWNED" = 1 ] && [ "$W_OPEN" = 1 ] && kill -0 "$WPID" 2>/dev/null; then
+      curl -s -o /dev/null --max-time 10 --digest -u "$WCRED" "$WURL" -d '{"jsonrpc":"2.0","id":"0","method":"stop_wallet"}'
+      gone "$WPID" 30
+    fi
+    halt "$WPID"
+  fi
+  if [ -n "$MPID" ]; then
+    if [ "$M_OWNED" = 1 ] && kill -0 "$MPID" 2>/dev/null; then
+      curl -s -o /dev/null --max-time 10 --digest -u "$MCRED" -X POST "$MURL/stop_daemon"
+      gone "$MPID" 60
+    fi
+    halt "$MPID"
+  fi
+  if [ "$PASSED" = 1 ]; then rm -rf -- "$D"; echo "SESSION PASSED"
+  else echo "SESSION FAILED (exit $rc)${D:+; files kept in $D}"; fi
+}
+trap finish EXIT
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM    # a signal ends the script through finish
+
+port_free() {    # curl exit 7: connection refused, so nothing listens on 127.0.0.1:$1
+  local rc=0
+  curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$1/" || rc=$?
+  [ "$rc" -eq 7 ]
+}
+started() {    # started <pid> <name> <log stem> <line>: the line within 90 s, failing as soon as the PID has exited
+  local _
+  for _ in $(seq 90); do
+    kill -0 "$1" 2>/dev/null || fail "$2 exited during start-up; read $3.log and $3.console.log in $D"
+    grep -qF -- "$4" "$D/$3.log" 2>/dev/null && return 0
+    sleep 1
+  done
+  fail "$2 not up after 90 s; read $3.log and $3.console.log in $D"
+}
+owned() {    # owned <name> <pid> <url> <login> <request>: HTTP 401 without the login, then success with it
+  local code
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$3" -d "$5") || true
+  [ "$code" = 401 ] || fail "$1's port answered HTTP ${code:-none} without the login, so it is not this run's $1"
+  echo "$1: HTTP 401 without the login"
+  OUT=$(curl -s --fail --max-time 10 --digest -u "$4" "$3" -d "$5") || fail "$1's port refused this run's login"
+  kill -0 "$2" 2>/dev/null || fail "$1 exited, so another process answered; read its logs in $D"
+}
+result() {    # result <method>: the JSON-RPC reply in OUT carries a result and no error
+  { grep -qF '"result"' <<<"$OUT" && ! grep -qF '"error"' <<<"$OUT"; } || fail "$1 answered: $OUT"
+}
+
+[ -f "$MONEROD" ] && [ -x "$MONEROD" ] && [ -f "$WALLET_RPC" ] && [ -x "$WALLET_RPC" ] \
+  || fail "$MONEROD and $WALLET_RPC must be executable files: build configuration A first"
+for _ in 1 2 3 4 5; do    # P p2p, P+1 RPC, P+2 ZMQ RPC, P+3 spare, P+4 wallet RPC
+  B=$((20000 + RANDOM % 1600 * 5))    # 20000-27999: below the ephemeral range, clear of Appendix B's fixed ports
+  if port_free "$B" && port_free "$((B + 1))" && port_free "$((B + 2))" && port_free "$((B + 4))"; then P=$B; break; fi
+  echo "ports $B-$((B + 4)): in use, trying another block"
+done
+[ -n "$P" ] || fail "five random port blocks were all in use"
+MURL=http://127.0.0.1:$((P + 1)) WURL=http://127.0.0.1:$((P + 4))/json_rpc
+D=$(mktemp -d "${TMPDIR:-/tmp}/monero-session.XXXXXX")    # new and empty: this run's only data
+MCRED="node:$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"      # logins known only to this script
+WCRED="wallet:$(od -An -N12 -tx1 /dev/urandom | tr -d ' \n')"
+
+"$MONEROD" --testnet --offline --no-igd --non-interactive --data-dir "$D/node" \
+  --p2p-bind-ip 127.0.0.1 --p2p-bind-port "$P" \
+  --rpc-bind-ip 127.0.0.1 --rpc-bind-port "$((P + 1))" --rpc-login "$MCRED" \
+  --zmq-rpc-bind-ip 127.0.0.1 --zmq-rpc-bind-port "$((P + 2))" \
+  --log-file "$D/monerod.log" > "$D/monerod.console.log" 2>&1 &
 MPID=$!
-until grep -q "core RPC server started ok" "$D/monerod.log" 2>/dev/null; do sleep 1; done
+echo "monerod pid $MPID; ports $P p2p, $((P + 1)) RPC, $((P + 2)) ZMQ RPC, $((P + 4)) wallet RPC; files in $D"
+started "$MPID" monerod monerod 'core RPC server started ok'
+owned monerod "$MPID" "$MURL/json_rpc" "$MCRED" '{"jsonrpc":"2.0","id":"0","method":"get_info"}'
+M_OWNED=1    # only this run's node knows its login, so a stop request now reaches only it
+for want in '"status": "OK"' '"height": 1,' '"nettype": "testnet"' '"offline": true'; do
+  grep -qF -- "$want" <<<"$OUT" || fail "get_info lacks $want"
+  echo "get_info: $want"
+done
 
-curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:$((P+1))/json_rpc \
-  -d '{"jsonrpc":"2.0","id":"0","method":"get_info"}'                     # 401 without credentials
-curl -s --digest -u user:pass -X POST http://127.0.0.1:$((P+1))/json_rpc \
-  -d '{"jsonrpc":"2.0","id":"0","method":"get_info"}'                     # status OK, height 1, testnet, offline
+ZMQ_REPLY=$("$ACC_ENV/venv/bin/python3" - "$((P + 2))" <<'EOF'
+import json, sys, zmq
+s = zmq.Context().socket(zmq.REQ)
+s.setsockopt(zmq.LINGER, 0)
+s.setsockopt(zmq.SNDTIMEO, 10000)    # ms: an endpoint that never answers fails the step
+s.setsockopt(zmq.RCVTIMEO, 10000)
+s.connect('tcp://127.0.0.1:' + sys.argv[1])
+try:
+    s.send_string(json.dumps({'jsonrpc': '2.0', 'id': 0, 'method': 'get_height', 'params': {}}))
+    print(s.recv_string())
+except zmq.Again:
+    sys.exit('no ZMQ RPC reply within 10 s')
+finally:
+    s.close(linger=0)
+EOF
+) || fail "ZMQ get_height failed"
+[ "$ZMQ_REPLY" = '{"jsonrpc":"2.0","id":0,"result":{"rpc_version":131072,"height":1}}' ] \
+  || fail "ZMQ get_height answered: $ZMQ_REPLY"
+echo "ZMQ get_height: $ZMQ_REPLY"
 
-$ACC_ENV/venv/bin/python3 -c "
-import zmq, json
-s = zmq.Context().socket(zmq.REQ); s.connect('tcp://127.0.0.1:$((P+2))')
-s.send_string(json.dumps({'jsonrpc':'2.0','id':0,'method':'get_height','params':{}}))
-print(s.recv_string())"
-# {"jsonrpc":"2.0","id":0,"result":{"rpc_version":131072,"height":1}}
-
-mkdir -p "$D/wallets"
-"$RUN/b/cand-A/bin/monero-wallet-rpc" --testnet --wallet-dir "$D/wallets" \
-  --rpc-bind-ip 127.0.0.1 --rpc-bind-port $((P+4)) --rpc-login wuser:wpass \
-  --daemon-address 127.0.0.1:$((P+1)) --daemon-login user:pass \
-  --log-file "$D/wallet-rpc.log" > /dev/null 2>&1 &
+mkdir "$D/wallets"
+"$WALLET_RPC" --testnet --wallet-dir "$D/wallets" \
+  --rpc-bind-ip 127.0.0.1 --rpc-bind-port "$((P + 4))" --rpc-login "$WCRED" \
+  --daemon-address "127.0.0.1:$((P + 1))" --daemon-login "$MCRED" \
+  --log-file "$D/wallet-rpc.log" > "$D/wallet-rpc.console.log" 2>&1 &
 WPID=$!
-sleep 5
-W="curl -s --digest -u wuser:wpass http://127.0.0.1:$((P+4))/json_rpc"
-$W -d '{"jsonrpc":"2.0","id":"0","method":"get_version"}'               # result.version 65569
-$W -d '{"jsonrpc":"2.0","id":"0","method":"create_wallet","params":{"filename":"smoke","password":"","language":"English"}}'
-$W -d '{"jsonrpc":"2.0","id":"0","method":"stop_wallet"}'               # needs an open wallet
-curl -s --digest -u user:pass -X POST http://127.0.0.1:$((P+1))/stop_daemon   # plain endpoint, not json_rpc
-wait "$WPID" "$MPID"; rm -rf "$D"
+echo "monero-wallet-rpc pid $WPID"
+started "$WPID" monero-wallet-rpc wallet-rpc 'Starting wallet RPC server'
+owned monero-wallet-rpc "$WPID" "$WURL" "$WCRED" '{"jsonrpc":"2.0","id":"0","method":"get_version"}'
+W_OWNED=1    # only this run's wallet server knows its login
+grep -qF '"version": 65569' <<<"$OUT" || fail "get_version lacks \"version\": 65569: $OUT"
+echo 'get_version: "version": 65569'
+
+OUT=$(curl -s --fail --max-time 60 --digest -u "$WCRED" "$WURL" \
+  -d '{"jsonrpc":"2.0","id":"0","method":"create_wallet","params":{"filename":"smoke","password":"","language":"English"}}') \
+  || fail "create_wallet failed"
+result create_wallet
+W_OPEN=1
+echo "create_wallet: wallet smoke is open"
+OUT=$(curl -s --fail --max-time 30 --digest -u "$WCRED" "$WURL" -d '{"jsonrpc":"2.0","id":"0","method":"stop_wallet"}') \
+  || fail "stop_wallet failed"    # needs an open wallet; saves it and stops the server
+result stop_wallet
+W_OPEN=0
+gone "$WPID" 60 || fail "monero-wallet-rpc still running 60 s after stop_wallet"
+RC=0; wait "$WPID" || RC=$?
+WPID=
+[ "$RC" -eq 0 ] || fail "monero-wallet-rpc exited with status $RC; read wallet-rpc.log in $D"
+echo "stop_wallet: monero-wallet-rpc exited 0"
+
+OUT=$(curl -s --fail --max-time 30 --digest -u "$MCRED" -X POST "$MURL/stop_daemon") \
+  || fail "stop_daemon failed"    # a plain endpoint, not json_rpc
+grep -qF '"status": "OK"' <<<"$OUT" || fail "stop_daemon answered: $OUT"
+gone "$MPID" 60 || fail "monerod still running 60 s after stop_daemon"
+RC=0; wait "$MPID" || RC=$?
+MPID=
+[ "$RC" -eq 0 ] || fail "monerod exited with status $RC; read monerod.log in $D"
+echo "stop_daemon: monerod exited 0"
+PASSED=1    # both servers exited 0, so finish deletes $D
 ```
 
-Section 4 reports an equivalent sequence, run on both twins with the acceptance image's `acc-runtime-smoke` helper on ports of its own, which also checks a wrong password, `get_address` and `get_height`. `monerod` has no `--disable-rpc-login` flag; that flag belongs to the wallet server.
+- **A pass** prints the node's PID, ports and directory; `monerod: HTTP 401 without the login`; four `get_info:` lines (`"status": "OK"`, `"height": 1,`, `"nettype": "testnet"`, `"offline": true`); `ZMQ get_height: {"jsonrpc":"2.0","id":0,"result":{"rpc_version":131072,"height":1}}`; the wallet server's PID; `monero-wallet-rpc: HTTP 401 without the login`; `get_version: "version": 65569`; `create_wallet: wallet smoke is open`; `stop_wallet: monero-wallet-rpc exited 0`; `stop_daemon: monerod exited 0`; and `SESSION PASSED`. The directory is then gone and the script exits 0.
+- **Any other ending** is a `session:` line naming the failed check, then `SESSION FAILED (exit <n>)`, with the kept directory's path once one exists, and a non-zero exit. Read `monerod.log`, `monerod.console.log`, `wallet-rpc.log` and `wallet-rpc.console.log` there, fix the cause, then delete that directory. An occupied block prints `ports <P>-<P+4>: in use, trying another block` before the next one is tried.
+
+*Verified here:* the preamble and this block, run unchanged in the acceptance image with the configuration A binaries, printed every line listed above and `SESSION PASSED`; both servers exited 0, the directory was gone and the exit status was 0. Drills with substitute binaries and occupied ports: an occupied block was skipped and the run passed; five occupied blocks stopped the script before anything started; a node that exits at once failed within 1 s; a wallet server that never listens hit the 90 s deadline; a wallet port taken after the check, and a wallet server that refuses this run's login, both failed before `create_wallet` or `stop_wallet` was sent; a refused `stop_wallet` was sent again by the trap; and `TERM` or `INT` mid-run exited 143 or 130. Every failure after start-up kept its directory and left no `monerod` or `monero-wallet-rpc` running; wherever the node had passed its ownership check, the trap stopped it through `stop_daemon`.
+
+Section 4 reports the same requests, made on both twins by the acceptance image's `acc-runtime-smoke` helper on ports of its own; that helper also checks a wrong password, `get_address` and `get_height`. `monerod` has no `--disable-rpc-login` flag; that flag belongs to the wallet server.
 
 ### Troubleshooting
 
@@ -2130,7 +2287,7 @@ Every command below runs in Bash after the Section 9 preamble ("Configure and bu
 | Build everything | `/usr/bin/ninja -C "$RUN/b/cand-A" -j "$JOBS" -k 0 all 2>&1 \| tee "$RUN/logs/build-cand-A.log"; check_build $? "$RUN/logs/build-cand-A.log"`: `check_build` prints Ninja's status (`pipefail` makes it Ninja's, not `tee`'s) and the log's `: error:` count, and stops the script with exit 1 unless both are 0. Every other configuration uses its own build directory and log, and E builds with `USE_DEVICE_TREZOR_MANDATORY=ON` exported, as in Section 9 |
 | C++17 twin | `cd "$RUN" && cp -a "$CHECKOUT" cand && cp -a cand base && sed -i '136s/set(CMAKE_CXX_STANDARD 23)/set(CMAKE_CXX_STANDARD 17)/' base/CMakeLists.txt && diff -r -q --exclude=.git cand base`. Each twin then configures and builds exactly as its candidate, from `"$RUN/base"` into `"$RUN/b/base-A"` and so on |
 | Twin identity | `git -C "$RUN/cand" rev-parse --short=9 HEAD; git -C "$RUN/base" rev-parse --short=9 HEAD; git -C "$RUN/cand" submodule status; git -C "$RUN/base" submodule status; cmp "$RUN/b/cand-A/version.cpp" "$RUN/b/base-A/version.cpp"`. Configure writes `version.cpp` to the build root (`cmake/Version.cmake:31`) |
-| Warning census | The comparison script of Section 5.3.8, Step 5.5, saved as `/tmp/twin-census.py`. It keys every `file:line: warning: … [-Wflag]` as `(flag, file:line)` and every other warning as `(LINK/DRIVER, line)` on the complete normalized line, object and library names kept. Before keying it replaces the typed roots with `<src>/`, `<build>/`, `<boost>/`, `<depends>/` and `<work>/`, longest first, and only where a root begins a path (at the start of the line or after whitespace, a quote, `=`, `,`, `;`, `(`, `[`, `<`, `\|`, a placeholder or a one-letter option such as `-I`) and ends at a path component, so `/w/cand` never matches inside `/w/cand2/`, `/w/cand@2/` or `/unrelated/w/cand/`. It rewrites each depends package directory to `<pkg:name>` (`<pkg:name>/src/…` in a build directory, `<pkg:name><depends>/include/…` for a staged header, whose embedded depends prefix is matched once more after that rewrite) and prefixes relative names in package logs with the package being built. Each key gets one of seven provenance classes (repository, vendored, submodule, generated, dependency, toolchain, link/driver) for routing only. A key is new when its candidate count exceeds its baseline count; the pair passes only with `new keys: 0` (exit status 0). Monero pair, configuration A (every other pair uses its own logs and build directories): `python3 /tmp/twin-census.py "$RUN/logs/build-base-A.log" "src=$RUN/base,build=$RUN/b/base-A,boost=$ACC_ENV/boost-1.91.0-1" "$RUN/logs/build-cand-A.log" "src=$RUN/cand,build=$RUN/b/cand-A,boost=$ACC_ENV/boost-1.91.0-1"`; depends package logs: `python3 /tmp/twin-census.py "$RUN/logs/depends-c17.log" "depends=$RUN/depends-c17/x86_64-linux-gnu,work=$RUN/depends-c17/work" "$RUN/logs/depends-c23.log" "depends=$RUN/depends-c23/x86_64-linux-gnu,work=$RUN/depends-c23/work"`; for the depends-built Monero pair (`"$RUN/logs/build-depmon-c17.log"` against `"$RUN/logs/build-depmon-c23.log"`, with `src=$RUN/depsrc-c17,build=$RUN/b/depmon-c17` and `src=$RUN/depsrc-c23,build=$RUN/b/depmon-c23`), add `depends=$RUN/depends-c17/x86_64-linux-gnu` and `depends=$RUN/depends-c23/x86_64-linux-gnu` to the matching side's roots |
+| Warning census | The comparison script of Section 5.3.8, Step 5.5, saved by that block's lines from `CENSUS_DIR= CENSUS_PY=` through the heredoc's closing `EOF`: they write it to `"$CENSUS_PY"` in a new, private directory that `mktemp -d "${TMPDIR:-/tmp}/twin-census.XXXXXX"` creates, stop the script with exit status 3 unless both the directory and the file were written, and on exit, an interrupt included, delete only that file and that directory. It keys every `file:line: warning: … [-Wflag]` as `(flag, file:line)` and every other warning as `(LINK/DRIVER, line)` on the complete normalized line, object and library names kept. Before keying it replaces the typed roots with `<src>/`, `<build>/`, `<boost>/`, `<depends>/` and `<work>/`, longest first, and only where a root begins a path (at the start of the line or after whitespace, a quote, `=`, `,`, `;`, `(`, `[`, `<`, `\|`, a placeholder or a one-letter option such as `-I`) and ends at a path component, so `/w/cand` never matches inside `/w/cand2/`, `/w/cand@2/` or `/unrelated/w/cand/`. It rewrites each depends package directory to `<pkg:name>` (`<pkg:name>/src/…` in a build directory, `<pkg:name><depends>/include/…` for a staged header, whose embedded depends prefix is matched once more after that rewrite) and prefixes relative names in package logs with the package being built. Each key gets one of seven provenance classes (repository, vendored, submodule, generated, dependency, toolchain, link/driver) for routing only. A key is new when its candidate count exceeds its baseline count; the pair passes only with `new keys: 0` (exit status 0). Monero pair, configuration A (every other pair uses its own logs and build directories): `python3 "$CENSUS_PY" "$RUN/logs/build-base-A.log" "src=$RUN/base,build=$RUN/b/base-A,boost=$ACC_ENV/boost-1.91.0-1" "$RUN/logs/build-cand-A.log" "src=$RUN/cand,build=$RUN/b/cand-A,boost=$ACC_ENV/boost-1.91.0-1"`; depends package logs: `python3 "$CENSUS_PY" "$RUN/logs/depends-c17.log" "depends=$RUN/depends-c17/x86_64-linux-gnu,work=$RUN/depends-c17/work" "$RUN/logs/depends-c23.log" "depends=$RUN/depends-c23/x86_64-linux-gnu,work=$RUN/depends-c23/work"`; for the depends-built Monero pair (`"$RUN/logs/build-depmon-c17.log"` against `"$RUN/logs/build-depmon-c23.log"`, with `src=$RUN/depsrc-c17,build=$RUN/b/depmon-c17` and `src=$RUN/depsrc-c23,build=$RUN/b/depmon-c23`), add `depends=$RUN/depends-c17/x86_64-linux-gnu` and `depends=$RUN/depends-c23/x86_64-linux-gnu` to the matching side's roots |
 | Link-test standard probe | In scratch copies, prefix the generated source at `CMakeLists.txt:282` with `static_assert(__cplusplus == 202302L);` (C++17 twin: `201703L`) and configure with A's options: rc 0. Delete `CMakeLists.txt:299-301` as well: configure stops with "Undefined symbols test failure: expect(TRUE), success(FALSE)" |
 | Build-file greps | Section 3.3, "Build-file checks" (both must print nothing) |
 | Twin compile databases | Set `CAND_SRC`, `CAND_BUILD`, `BASE_SRC` and `BASE_BUILD` to one pair's source copies and build directories, then run the script of Section 3.2, "Compile-database comparison", once for each pair A-E: it must print equal entry counts and `other differences: 0`. B, D and both E pairs are pending (Section 3.2) |
@@ -2158,7 +2315,7 @@ Every command below runs in Bash after the Section 9 preamble ("Configure and bu
 | 18090-18484 | Python RPC scenarios | Fixed; one run per network namespace |
 | 8080, 5262, 5263, 5626, 19080-19082 | Port-binding unit suites (`http_server`, `boosted_tcp_server`, `test_epee_connection`, `node_server`) | Fixed; one `unit_tests` run per network namespace |
 | 36230 / 36231 | Network-load harness | Fixed |
-| 22630-22634 | Example block in Section 9 | P2P, RPC, ZMQ-RPC, spare, wallet RPC |
+| 20000-27999 | Section 9 session ("Running the software") | A random five-port block: P2P, RPC, ZMQ-RPC, spare, wallet RPC; used only if all but the spare are free |
 | 40000-48992 | Section 5.3 smoke test | A random three-port block, used only if all three are free |
 
 ## C. Key File Locations
@@ -2177,8 +2334,8 @@ Every command below runs in Bash after the Section 9 preamble ("Configure and bu
 | `src/common/expect.h:145-146` | `alignas(T) unsigned char storage_[sizeof(T)]` plus its size assertion |
 | `contrib/epee/src/net_ssl.cpp:96-107` | `fingerprint_less`, shared by the sort at `:211` and the search at `:394` |
 | `src/daemon/main.cpp:117-119` | The Windows-only diagnostic, now `static_cast<const void*>(root_path)`: landed, native confirmation pending |
-| `.github/workflows/build.yml:18`, `:165-166`, `:217-218` | `g++-14` in `APT_INSTALL_LINUX`; `CC: gcc-14` and `CXX: g++-14` in `build-linux` and `test-ubuntu` |
-| `.github/workflows/depends.yml:27-29`, `:114-115` | `debian:13` default container; `depends-cxx23-debian13-` cache key and restore key |
+| `.github/workflows/build.yml:22`, `:175-176`, `:229-230` | `g++-14` in `APT_INSTALL_LINUX`; `CC: gcc-14` and `CXX: g++-14` in `build-linux` and `test-ubuntu` |
+| `.github/workflows/depends.yml:31-34`, `:134-135` | `debian:13` default container; `depends-cxx23-debian13-` cache key and restore key |
 | `contrib/guix/manifest.scm:85-93` | The `gcc-14.2` variant, `gcc-toolchain-14.2` and `(define base-gcc gcc-14.2)` |
 | `README.md:142-144`, `:162-170` | Dependency rows (GCC 13, Clang 16 / Apple Clang 15, CMake 3.20) and the build-requirements prose |
 | `src/wallet/api/wallet2_api.h` | Public wallet API; unchanged since `454075bc6` and since `861efbceb` |
@@ -2200,7 +2357,7 @@ Every command below runs in Bash after the Section 9 preamble ("Configure and bu
 | protobuf / protoc | 3.21.12 (system); 21.12 (depends) | The depends library is the open blocker (Section 5.2) |
 | Rust / cargo | 1.93.1 (rustup-init 1.29.0) | Mandatory |
 | Python | 3.12.3 with the pinned set of Section 9 | Gates two registered tests |
-| Vendored, pinned to C++11 | easylogging++, qrcodegen, RandomX | Unchanged by the migration |
+| Pinned to C++11 | easylogging++ and qrcodegen (vendored); RandomX (submodule) | Unchanged by the migration |
 
 ## E. Environment Variable Reference
 
@@ -2230,7 +2387,7 @@ No secret, token or credential is used anywhere in the build or the tests. The o
 
 ## F. Developer Tools Guide
 
-- **Compilation database.** `<dir>/compile_commands.json` shows what the macro-generated serialization code and the `.inl` template bodies expand to, and which `-std=` each translation unit receives.
+- **Compilation database.** `<dir>/compile_commands.json` records each translation unit's exact compiler `command` and `directory`, the `-std=` it receives included, and no expanded code. To see what the macro-generated serialization code and the `.inl` template bodies expand to, run an entry's `command` from its `directory` with `-E` in place of `-c` and `-o <object>`; the output shows the macro expansions and the included `.inl` text, not template instantiations.
 - **Compiler cache.** Keep `ccache` enabled for development. Disable it with `-D COMPILER_CACHE=none` for any warning census, because cached compiles replay their stored diagnostics.
 - **Doxygen.** `HAVE_DOT=YES doxygen Doxyfile` produces cross-referenced call graphs for the template-heavy P2P and protocol code.
 - **depends interrogation.** `make -C contrib/depends print-host_CXXFLAGS HOST=x86_64-linux-gnu` shows the dialect reaching a target host; `make -C contrib/depends -s print-build_CXX HOST=x86_64-linux-gnu` shows the native compiler name, which must stay `g++`.
@@ -2246,7 +2403,7 @@ No secret, token or credential is used anywhere in the build or the tests. The o
 | Twin | The same commit built twice, as the C++23 candidate and as its C++17 baseline (only `CMakeLists.txt:136` differs), with identical compilers, options and dependencies |
 | Census key | `(flag, file:line)` for a located warning, `(LINK/DRIVER, message)` otherwise, after root normalisation. A key is new when the candidate's count exceeds the baseline's |
 | Provenance class | Repository, vendored, submodule, generated, dependency, toolchain or link/driver. It routes a new key to its remedy and never exempts it |
-| Source-edit rule | A file under `src/`, `contrib/epee/`, `tests/` or vendored `external/` code is edited only for a compile error, a new census key located in it, or a demonstrated C++23 runtime regression, with the smallest call-site change |
+| Source-edit rule | A first-party file under `src/`, `contrib/epee/` or `tests/` is edited only for a compile error in an acceptance configuration, a new census key located in it, or a demonstrated C++23 runtime regression (a case that passes in the C++17 twin and fails, is skipped or is missing at C++23), with the smallest change at the cause. Vendored `external/easylogging++`, `external/qrcodegen` and the Boost headers under `external/boost` are edited only for a compile failure, and every such patch carries `// C++23 migration: <what changed and why>` on the line above its first changed line. Submodule sources are never edited; a failing submodule gets only a target-scoped `CXX_STANDARD` at the standard it builds with today |
 | Frozen-directory boundary | In `src/cryptonote_core`, `src/cryptonote_basic`, `src/crypto`, `src/ringct` and `src/blockchain_db`, only a compile or diagnostic fix whose expressions evaluate as at C++17, or a fix that restores a construct's C++17 meaning, is allowed |
 | Open acceptance blocker | A failed criterion that no in-scope remedy can fix; it is reported for the owner's decision, never suppressed |
 | Depends | The deterministic cross-build system under `contrib/depends`, which builds pinned dependencies from source per host |

@@ -206,7 +206,7 @@ if(Protobuf_FOUND AND USE_DEVICE_TREZOR)
         trezor_fatal_msg("Trezor: LibUSB not found or test failed, please install libusb-1.0.26")
     endif()
 
-    # Publish readiness only after every requested dependency check has passed:
+    # Publish readiness after the dependency checks required for this platform:
     # on an optional failure trezor_fatal_msg turns Trezor off and returns early.
     set(DEVICE_TREZOR_READY 1)
     add_definitions(-DDEVICE_TREZOR_READY=1)
