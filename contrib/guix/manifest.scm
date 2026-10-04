@@ -82,7 +82,15 @@ chain for " target " development."))
       (home-page (package-home-page xgcc))
       (license (package-license xgcc)))))
 
-(define base-gcc gcc-15)
+; GCC 14.2 pin: channel 0c2eff26 packages gcc-14 as 14.3.0, so 14.2.0 is a variant of it
+(define gcc-14.2
+  (package (inherit gcc-14) (version "14.2.0")
+    (source (origin (inherit (package-source gcc-14))
+              (uri "mirror://gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.xz")
+              (sha256 (base32 "1j9wdznsp772q15w1kl5ip0gf0bh8wkanq2sdj12b7mzkk39pcx7"))))))
+; make-gcc-toolchain is not exported by (gnu packages commencement) at this channel, hence @@
+(define gcc-toolchain-14.2 ((@@ (gnu packages commencement) make-gcc-toolchain) gcc-14.2))
+(define base-gcc gcc-14.2)
 (define base-linux-kernel-headers linux-libre-headers-6.1)
 
 (define* (make-monero-cross-toolchain  target
@@ -304,30 +312,30 @@ chain for " target " development."))
     (cond ((string-suffix? "-mingw32" target)
            (list
              zip ; used to create release archives
-             gcc-toolchain-15
+             gcc-toolchain-14.2
              (make-mingw-pthreads-cross-toolchain target)))
           ((string-contains target "-linux-gnu")
            (list
-             gcc-toolchain-15
-             (list gcc-toolchain-15 "static")
+             gcc-toolchain-14.2
+             (list gcc-toolchain-14.2 "static")
              (if (string-contains target "loongarch64")
                (make-monero-cross-toolchain target #:base-libc glibc)
                (make-monero-cross-toolchain target))))
           ((string-contains target "freebsd")
            (list
              xz ; used to unpack freebsd_base
-             gcc-toolchain-15
-             (list gcc-toolchain-15 "static")
+             gcc-toolchain-14.2
+             (list gcc-toolchain-14.2 "static")
              clang-toolchain-22
              binutils))
           ((string-contains target "android")
             (list
               unzip ; used to unpack android_ndk
-              gcc-toolchain-15
-              (list gcc-toolchain-15 "static")))
+              gcc-toolchain-14.2
+              (list gcc-toolchain-14.2 "static")))
           ((string-contains target "darwin")
            (list
-             gcc-toolchain-15
+             gcc-toolchain-14.2
              clang-toolchain-22
              lld-22
              (make-lld-wrapper lld-22 #:lld-as-ld? #t)))
