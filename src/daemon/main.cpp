@@ -114,7 +114,9 @@ bool isFat32(const wchar_t* root_path)
   std::vector<wchar_t> fs(MAX_PATH + 1);
   if (!::GetVolumeInformationW(root_path, nullptr, 0, nullptr, 0, nullptr, &fs[0], MAX_PATH))
   {
-    MERROR("Failed to get '" << root_path << "' filesystem name. Error code: " << ::GetLastError());
+    // Inserting a const wchar_t* into a narrow stream is deleted since C++20; C++17
+    // resolved it to operator<<(const void*), so the cast keeps the logged text unchanged.
+    MERROR("Failed to get '" << static_cast<const void*>(root_path) << "' filesystem name. Error code: " << ::GetLastError());
     return false;
   }
 
