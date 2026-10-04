@@ -24,7 +24,7 @@ OPTION(USE_DEVICE_TREZOR_DEBUG "Trezor Debugging enabled" $ENV{USE_DEVICE_TREZOR
 OPTION(TREZOR_DEBUG "Main Trezor debugging switch" $ENV{TREZOR_DEBUG})
 
 macro(trezor_fatal_msg msg)
-    if ($ENV{USE_DEVICE_TREZOR_MANDATORY})
+    if (USE_DEVICE_TREZOR_MANDATORY)
         message(FATAL_ERROR
                 "${msg}\n"
                 "==========================================================================\n"
@@ -98,6 +98,15 @@ if(Protobuf_FOUND AND USE_DEVICE_TREZOR)
         else()
             set(PROTOBUF_TRYCOMPILE_LINKER "${Protobuf_LIBRARY}")
         endif()
+
+        # Linker flags reach the probe through LINK_OPTIONS: under policy CMP0056 the generated
+        # project sets CMAKE_EXE_LINKER_FLAGS itself, so a CMAKE_FLAGS value is never used.
+        # One SHELL: group keeps their order and repeats (separate items are de-duplicated).
+        set(PROTOBUF_TRYCOMPILE_LINK_OPTIONS "")
+        string(STRIP "${CMAKE_TRY_COMPILE_LINKER_FLAGS}" _trezor_probe_linker_flags)
+        if(NOT _trezor_probe_linker_flags STREQUAL "")
+            set(PROTOBUF_TRYCOMPILE_LINK_OPTIONS "SHELL:${_trezor_probe_linker_flags}")
+        endif()
         
         try_compile(Protobuf_COMPILE_TEST_PASSED
             "${CMAKE_BINARY_DIR}"
@@ -105,9 +114,9 @@ if(Protobuf_FOUND AND USE_DEVICE_TREZOR)
             "${CMAKE_BINARY_DIR}/test-protobuf.pb.cc"
             "${CMAKE_CURRENT_LIST_DIR}/test-protobuf.cpp"
             CMAKE_FLAGS
-            CMAKE_EXE_LINKER_FLAGS ${CMAKE_TRY_COMPILE_LINKER_FLAGS}
             "-DINCLUDE_DIRECTORIES=${Protobuf_INCLUDE_DIR};${CMAKE_BINARY_DIR}"
             "-DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}"
+            LINK_OPTIONS ${PROTOBUF_TRYCOMPILE_LINK_OPTIONS}
             LINK_LIBRARIES "${PROTOBUF_TRYCOMPILE_LINKER}" ${CMAKE_TRY_COMPILE_LINK_LIBRARIES}
             OUTPUT_VARIABLE OUTPUT
         )
@@ -175,22 +184,6 @@ if(Protobuf_FOUND AND USE_DEVICE_TREZOR)
     endforeach ()
 
     message(STATUS "Trezor: protobuf messages regenerated out.")
-    set(DEVICE_TREZOR_READY 1)
-    add_definitions(-DDEVICE_TREZOR_READY=1)
-    add_definitions(-DPROTOBUF_INLINE_NOT_IN_HEADERS=0)
-
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_definitions(-DTREZOR_DEBUG=1)
-    endif()
-
-    if(USE_DEVICE_TREZOR_UDP_RELEASE)
-        message(STATUS "Trezor: UDP transport enabled (emulator)")
-        add_definitions(-DUSE_DEVICE_TREZOR_UDP_RELEASE=1)
-    endif()
-
-    if (Protobuf_INCLUDE_DIR)
-        include_directories(${Protobuf_INCLUDE_DIR})
-    endif()
 
     # LibUSB support, check for particular version
     # Include support only if compilation test passes
@@ -211,6 +204,25 @@ if(Protobuf_FOUND AND USE_DEVICE_TREZOR)
         message(STATUS "Trezor: compatible LibUSB found at: ${LibUSB_INCLUDE_DIRS}")
     elseif(USE_DEVICE_TREZOR_LIBUSB AND NOT ANDROID)
         trezor_fatal_msg("Trezor: LibUSB not found or test failed, please install libusb-1.0.26")
+    endif()
+
+    # Publish readiness only after every requested dependency check has passed:
+    # on an optional failure trezor_fatal_msg turns Trezor off and returns early.
+    set(DEVICE_TREZOR_READY 1)
+    add_definitions(-DDEVICE_TREZOR_READY=1)
+    add_definitions(-DPROTOBUF_INLINE_NOT_IN_HEADERS=0)
+
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_definitions(-DTREZOR_DEBUG=1)
+    endif()
+
+    if(USE_DEVICE_TREZOR_UDP_RELEASE)
+        message(STATUS "Trezor: UDP transport enabled (emulator)")
+        add_definitions(-DUSE_DEVICE_TREZOR_UDP_RELEASE=1)
+    endif()
+
+    if (Protobuf_INCLUDE_DIR)
+        include_directories(${Protobuf_INCLUDE_DIR})
     endif()
 
     if (BUILD_GUI_DEPS)

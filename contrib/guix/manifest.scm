@@ -309,7 +309,9 @@ chain for " target " development."))
         git-minimal ; used to create the release source archive
     )
   (let ((target (getenv "HOST")))
-    (cond ((string-suffix? "-mingw32" target)
+    (cond ((or (not target) (string-null? target))
+           (error "HOST is unset or empty; set it to the platform triple to build for, e.g. x86_64-linux-gnu"))
+          ((string-suffix? "-mingw32" target)
            (list
              zip ; used to create release archives
              gcc-toolchain-14.2
@@ -339,4 +341,6 @@ chain for " target " development."))
              clang-toolchain-22
              lld-22
              (make-lld-wrapper lld-22 #:lld-as-ld? #t)))
-          (else '())))))
+          (else
+           (error "unsupported HOST; it must match *-mingw32, *-linux-gnu*, *freebsd*, *android* or *darwin*:"
+                  target))))))

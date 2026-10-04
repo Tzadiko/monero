@@ -53,7 +53,7 @@ if (POLICY CMP0179)
 endif()
 
 if (IOS)
-    INCLUDE(CmakeLists_IOS.txt)
+    INCLUDE("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_IOS.txt")
 endif()
 
 project(monero)
@@ -243,7 +243,7 @@ function (monero_add_minimal_executable name)
     monero_set_target_strip    ("${name}")
 endfunction()
 
-# Finds all headers in a directory and its subdirs, to be able to search for them and autosave in IDEs.
+# Finds all headers in a directory and its immediate subdirectories (one level deep), to be able to search for them and autosave in IDEs.
 #
 # Parameters:
 # - headers_found:    Output variable, which will hold the found headers
@@ -251,7 +251,7 @@ endfunction()
 macro (monero_find_all_headers headers_found module_root_dir)
   file(GLOB ${headers_found}
            "${module_root_dir}/*.h*"    # h* will include hpps as well.
-           "${module_root_dir}/**/*.h*" # Any number of subdirs will be included.
+           "${module_root_dir}/**/*.h*" # One subdir level only: file(GLOB) does not recurse, "**" matches a single directory name.
            "${module_root_dir}/*.inl"   # .inl is typically template code and is being treated as headers (it's being included).
            "${module_root_dir}/**/*.inl"
 )
@@ -422,22 +422,22 @@ endif()
 option(MANUAL_SUBMODULES "Skip submodule up-to-date checks" OFF)
 if(NOT MANUAL_SUBMODULES)
   find_package(Git)
-  if(GIT_FOUND)
+  if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     function (check_submodule relative_path)
-      execute_process(COMMAND git rev-parse "HEAD" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${relative_path} OUTPUT_VARIABLE localHead)
-      execute_process(COMMAND git rev-parse "HEAD:${relative_path}" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE checkedHead)
-      string(COMPARE EQUAL "${localHead}" "${checkedHead}" upToDate)
-      if (upToDate)
+      execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --verify "HEAD" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${relative_path} RESULT_VARIABLE localStatus OUTPUT_VARIABLE localHead ERROR_VARIABLE localError OUTPUT_STRIP_TRAILING_WHITESPACE)
+      execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --verify "HEAD:${relative_path}" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} RESULT_VARIABLE checkedStatus OUTPUT_VARIABLE checkedHead ERROR_VARIABLE checkedError OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if (localStatus EQUAL 0 AND checkedStatus EQUAL 0 AND "${localHead}" MATCHES "^[0-9a-f]+$" AND "${localHead}" STREQUAL "${checkedHead}")
         message(STATUS "Submodule '${relative_path}' is up-to-date")
       else()
-        message(FATAL_ERROR "Submodule '${relative_path}' is not up-to-date. Please update all submodules with\ngit submodule update --init --force\nor run cmake with -DMANUAL_SUBMODULES=1\n")
+        message(FATAL_ERROR "Submodule '${relative_path}' is not up-to-date or could not be verified (checked out '${localHead}', recorded '${checkedHead}'; git rev-parse exit status ${localStatus} and ${checkedStatus}).\n${localError}${checkedError}Please update all submodules with\ngit submodule update --init --force\nor run cmake with -DMANUAL_SUBMODULES=1\n")
       endif()
     endfunction ()
-    
     message(STATUS "Checking submodules")
     check_submodule(external/rapidjson)
     check_submodule(external/randomx)
     check_submodule(external/supercop)
+  elseif(GIT_FOUND)
+    message(STATUS "Submodule checks skipped: ${CMAKE_CURRENT_SOURCE_DIR} is not a Git checkout (for example a source archive)")
   endif()
 endif()
 
