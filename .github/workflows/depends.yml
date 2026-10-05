@@ -10,6 +10,10 @@ on:
       - 'docs/**'
       - '**/README.md'
 
+# Least-privilege GITHUB_TOKEN; actions/cache and upload-artifact use the runtime token, not GITHUB_TOKEN
+permissions:
+  contents: read
+
 env:
   APT_SET_CONF: |
     tee -a /etc/apt/apt.conf.d/80-custom << EOF
@@ -25,7 +29,9 @@ jobs:
   build-cross:
     runs-on: ubuntu-latest
     container:
-      image: ${{ matrix.toolchain.container || 'ubuntu:22.04' }}
+      # Per-entry override hook: a toolchain entry may set "container"; none does, so every host builds on Debian 13 (GCC 14.2.0)
+      # Default is the official tag plus its multi-arch index digest; refresh both together from `docker buildx imagetools inspect debian:13`
+      image: ${{ matrix.toolchain.container || 'debian:13@sha256:9cc080028c43b27d2074d63a5f9caf7166d731494965616c1a6d2827a004585c' }}
       env:
         DEBIAN_FRONTEND: noninteractive
     strategy:
@@ -35,8 +41,7 @@ jobs:
           - name: "RISCV 64bit"
             host: "riscv64-linux-gnu"
             rust_host: "riscv64gc-unknown-linux-gnu"
-            packages: "g++-riscv64-linux-gnu"
-            container: "ubuntu:26.04" # RandomX v2 requires GCC 14 or above for riscv64
+            packages: "g++-riscv64-linux-gnu" # GCC 14.2 (Debian 13); RandomX v2 requires GCC 14 or above for riscv64
           - name: "ARM v8"
             host: "aarch64-linux-gnu"
             rust_host: "aarch64-unknown-linux-gnu"
@@ -48,8 +53,7 @@ jobs:
           - name: "Win64"
             host: "x86_64-w64-mingw32"
             rust_host: "x86_64-pc-windows-gnu"
-            packages: "g++-mingw-w64-x86-64"
-            container: "ubuntu:24.04" # Rust >= 1.70 requires binutils >= 2.40
+            packages: "g++-mingw-w64-x86-64" # GCC 14.2, binutils 2.44 (Debian 13); Rust >= 1.70 requires binutils >= 2.40
           - name: "x86_64 Linux"
             host: "x86_64-unknown-linux-gnu"
             rust_host: "x86_64-unknown-linux-gnu"
@@ -82,14 +86,23 @@ jobs:
     - name: prepare apple-darwin
       if: ${{ matrix.toolchain.host == 'x86_64-apple-darwin' || matrix.toolchain.host == 'arm64-apple-darwin' }}
       run: |
-          cat << EOF >> /etc/apt/sources.list
-          deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main
-          deb-src http://apt.llvm.org/jammy/ llvm-toolchain-jammy-19 main
-          EOF
-          curl https://apt.llvm.org/llvm-snapshot.gpg.key > /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "/usr/lib/llvm-19/bin/" >> $GITHUB_PATH
     - name: install dependencies
       run: apt update; apt -y install build-essential cmake pkg-config git ccache ${{ matrix.toolchain.packages }}
+    - name: record toolchain provenance
+      # Debian 13's binutils 2.44-3 carries open parser advisories (e.g. CVE-2025-5244, CVE-2025-8225), fixed only in later revisions:
+      # record the installed toolchain and fail unless every binutils package is the archive's newest signed candidate
+      run: |
+          pkgs=$(dpkg-query -W -f "\${db:Status-Status} \${binary:Package} \${Version} \${source:Package}\n")
+          printf '%s\n' "$pkgs" | awk '$1 == "installed" && ($4 ~ /^binutils/ || $2 ~ /^(gcc|g[+][+]|cpp|clang|lld)/) { print $2, $3, "(source " $4 ")" }'
+          binutils=$(printf '%s\n' "$pkgs" | awk '$1 == "installed" && $4 ~ /^binutils/ { print $2 }')
+          [ -n "$binutils" ] || { echo "::error::no installed binutils package found"; exit 1; }
+          for pkg in $binutils; do
+            installed=$(dpkg-query -W -f "\${Version}" "$pkg")
+            candidate=$(apt-cache policy "$pkg" | sed -n 's/^  Candidate: //p')
+            [ "$installed" = "$candidate" ] || { echo "::error::$pkg $installed is not the archive candidate ${candidate:-none}"; exit 1; }
+          done
+          echo "every installed binutils package is the archive candidate"
     - name: install rust
       run: |
           curl -O https://static.rust-lang.org/rustup/archive/1.29.0/x86_64-unknown-linux-gnu/rustup-init
@@ -99,13 +112,14 @@ jobs:
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
     - name: configure git
       run: git config --global --add safe.directory '*'
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       with:
         fetch-depth: 0
         submodules: recursive
+        persist-credentials: false
 # Most volatile cache
     - name: restore ccache
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       id: ccache-restore
       with:
         path: ~/.cache/ccache
@@ -113,12 +127,12 @@ jobs:
         restore-keys: ccache-${{ matrix.toolchain.host }}-
 # Less volatile cache
     - name: restore depends cache
-      uses: actions/cache/restore@v5
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       id: depends-restore
       with:
         path: contrib/depends/built
-        key: depends-${{ matrix.toolchain.host }}-${{ hashFiles('contrib/depends/packages/*') }}
-        restore-keys: depends-${{ matrix.toolchain.host }}-
+        key: depends-cxx23-debian13-${{ matrix.toolchain.host }}-${{ hashFiles('contrib/depends/packages/*', 'contrib/depends/Makefile', 'contrib/depends/hosts/*', 'contrib/depends/toolchain.cmake.in') }}
+        restore-keys: depends-cxx23-debian13-${{ matrix.toolchain.host }}-
     - name: prepare w64-mingw32
       if: ${{ matrix.toolchain.host == 'x86_64-w64-mingw32' }}
       run: |
@@ -130,18 +144,18 @@ jobs:
         ${{env.CCACHE_SETTINGS}}
         make depends target=${{ matrix.toolchain.host }} -j${{env.MAKE_JOB_COUNT}}
     - name: save ccache
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       if: github.event_name != 'pull_request' && steps.ccache-restore.outputs.cache-hit != 'true'
       with:
         path: ~/.cache/ccache
         key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
     - name: save depends cache
-      uses: actions/cache/save@v5
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       if: github.event_name != 'pull_request' && steps.depends-restore.outputs.cache-hit != 'true'
       with:
         path: contrib/depends/built
         key: ${{ steps.depends-restore.outputs.cache-primary-key }}
-    - uses: actions/upload-artifact@v7
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: ${{ matrix.toolchain.host == 'x86_64-w64-mingw32' || matrix.toolchain.host == 'x86_64-apple-darwin' || matrix.toolchain.host == 'arm64-apple-darwin' || matrix.toolchain.host == 'x86_64-unknown-linux-gnu' }}
       with:
         name: ${{ matrix.toolchain.name }}

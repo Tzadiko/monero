@@ -135,28 +135,49 @@ Approximately three months prior to a scheduled software upgrade, a branch from 
 
 ### Dependencies
 
-The following table summarizes the tools and libraries required to build. A few of the libraries are also included in this repository (marked as "Vendored"). By default, the build uses the library installed on the system and ignores the vendored sources. However, if no library is found installed on the system, then the vendored source will be built and used. The vendored sources are also used for statically-linked builds because distribution packages often include only shared library binaries (`.so`) but not static library archives (`.a`).
+The following table summarizes the tools and libraries required to build. Required libraries must be installed on the system or supplied by the prefix that the `depends` system builds; the build never compiles a missing required library from bundled sources, and configure stops with an error instead. GTest, the only entry marked YES under "Vendored", is always built from the `external/gtest` submodule when tests are built (`BUILD_TESTS=ON`), and an installed GTest package is not used. Statically-linked builds need static library archives (`.a`) of the dependencies, which distribution packages often omit, shipping only shared library binaries (`.so`); the `depends` system builds them.
 
-| Dep          | Min. version  | Vendored | Debian/Ubuntu pkg    | Arch pkg     | Void pkg           | Fedora pkg          | Optional | Purpose         |
-| ------------ | ------------- | -------- | -------------------- | ------------ | ------------------ | ------------------- | -------- | --------------- |
-| GCC          | 7             | NO       | `build-essential`    | `base-devel` | `base-devel`       | `gcc`               | NO       |                 |
-| CMake        | 3.10          | NO       | `cmake`              | `cmake`      | `cmake`            | `cmake`             | NO       |                 |
-| pkg-config   | any           | NO       | `pkg-config`         | `base-devel` | `base-devel`       | `pkgconf`           | NO       |                 |
-| Boost        | 1.69          | NO       | `libboost-all-dev`   | `boost`      | `boost-devel`      | `boost-devel`       | NO       | C++ libraries   |
-| OpenSSL      | 1.1.1         | NO       | `libssl-dev`         | `openssl`    | `openssl-devel`    | `openssl-devel`     | NO       | cryptography    |
-| libzmq       | 4.2.0         | NO       | `libzmq3-dev`        | `zeromq`     | `zeromq-devel`     | `zeromq-devel`      | NO       | ZeroMQ library  |
-| libunbound   | 1.4.16        | NO       | `libunbound-dev`     | `unbound`    | `unbound-devel`    | `unbound-devel`     | NO       | DNS resolver    |
-| libsodium    | ?             | NO       | `libsodium-dev`      | `libsodium`  | `libsodium-devel`  | `libsodium-devel`   | NO       | cryptography    |
-| libunwind    | any           | NO       | `libunwind-dev`      | `libunwind`  | `libunwind-devel`  | `libunwind-devel`   | YES      | Stack traces    |
-| libreadline  | 6.3.0         | NO       | `libreadline-dev`    | `readline`   | `readline-devel`   | `readline-devel`    | YES      | Input editing   |
-| GTest        | 1.5           | YES      | `libgtest-dev`       | `gtest`      | `gtest-devel`      | `gtest-devel`       | YES      | Test suite      |
-| ccache       | any           | NO       | `ccache`             | `ccache`     | `ccache`           | `ccache`            | YES      | Compil. cache   |
-| Doxygen      | any           | NO       | `doxygen`            | `doxygen`    | `doxygen`          | `doxygen`           | YES      | Documentation   |
-| Graphviz     | any           | NO       | `graphviz`           | `graphviz`   | `graphviz`         | `graphviz`          | YES      | Documentation   |
-| libhidapi    | ?             | NO       | `libhidapi-dev`      | `hidapi`     | `hidapi-devel`     | `hidapi-devel`      | YES      | Hardware wallet |
-| libusb       | ?             | NO       | `libusb-1.0-0-dev`   | `libusb`     | `libusb-devel`     | `libusb1-devel`     | YES      | Hardware wallet |
-| libprotobuf  | ?             | NO       | `libprotobuf-dev`    | `protobuf`   | `protobuf-devel`   | `protobuf-devel`    | YES      | Hardware wallet |
-| protoc       | ?             | NO       | `protobuf-compiler`  | `protobuf`   | `protobuf`         | `protobuf-compiler` | YES      | Hardware wallet |
+| Dep         | Min. version                                                                       | Vendored | Debian/Ubuntu pkg   | Arch pkg     | Void pkg          | Fedora pkg          | Optional | Purpose                                                        |
+| ----------- | ---------------------------------------------------------------------------------- | -------- | ------------------- | ------------ | ----------------- | ------------------- | -------- | -------------------------------------------------------------- |
+| GCC         | 13                                                                                 | NO       | `build-essential`   | `base-devel` | `base-devel`      | `gcc-c++`           | NO       |                                                                |
+| Clang       | 16 (Apple Clang 15)                                                                | NO       | `clang`             | `clang`      | `clang`           | `clang`             | YES      | Alternative C++ compiler to GCC                                |
+| CMake       | 3.20                                                                               | NO       | `cmake`             | `cmake`      | `cmake`           | `cmake`             | NO       |                                                                |
+| pkg-config  | any                                                                                | NO       | `pkg-config`        | `base-devel` | `base-devel`      | `pkgconf-pkg-config`| NO       |                                                                |
+| Rust        | any stable that builds `src/fcmp_pp/fcmp_pp_rust`; 1.93 is the CI-tested toolchain | NO       | `rustup`            | `rust`       | `rust cargo`      | `rust cargo`        | NO       | FCMP++ library                                                 |
+| Boost       | 1.69                                                                               | NO       | `libboost-all-dev`  | `boost`      | `boost-devel`     | `boost-devel`       | NO       | C++ libraries (declared; 1.83 and 1.91.0 verified under C++23) |
+| OpenSSL     | 1.1.1                                                                              | NO       | `libssl-dev`        | `openssl`    | `openssl-devel`   | `openssl-devel`     | NO       | cryptography (C API; 3.0.13 verified, 3.5.7 pinned in depends) |
+| libzmq      | 4.2.0                                                                              | NO       | `libzmq3-dev`       | `zeromq`     | `zeromq-devel`    | `zeromq-devel`      | NO       | ZeroMQ library                                                 |
+| libunbound  | 1.4.16                                                                             | NO       | `libunbound-dev`    | `unbound`    | `unbound-devel`   | `unbound-devel`     | NO       | DNS resolver                                                   |
+| libsodium   | ?                                                                                  | NO       | `libsodium-dev`     | `libsodium`  | `libsodium-devel` | `libsodium-devel`   | NO       | cryptography                                                   |
+| libunwind   | any                                                                                | NO       | `libunwind-dev`     | `libunwind`  | `libunwind-devel` | `libunwind-devel`   | YES      | Stack traces                                                   |
+| libreadline | 6.3.0                                                                              | NO       | `libreadline-dev`   | `readline`   | `readline-devel`  | `readline-devel`    | YES      | Input editing                                                  |
+| GTest       | 1.5                                                                                | YES      | `libgtest-dev`      | `gtest`      | `gtest-devel`     | `gtest-devel`       | YES      | Test suite (built from `external/gtest`, not a package)        |
+| ccache      | any                                                                                | NO       | `ccache`            | `ccache`     | `ccache`          | `ccache`            | YES      | Compil. cache                                                  |
+| Doxygen     | any                                                                                | NO       | `doxygen`           | `doxygen`    | `doxygen`         | `doxygen`           | YES      | Documentation                                                  |
+| Graphviz    | any                                                                                | NO       | `graphviz`          | `graphviz`   | `graphviz`        | `graphviz`          | YES      | Documentation                                                  |
+| libhidapi   | ?                                                                                  | NO       | `libhidapi-dev`     | `hidapi`     | `hidapi-devel`    | `hidapi-devel`      | YES      | Hardware wallet                                                |
+| libusb      | ?                                                                                  | NO       | `libusb-1.0-0-dev`  | `libusb`     | `libusb-devel`    | `libusb1-devel`     | YES      | Hardware wallet                                                |
+| libprotobuf | ?                                                                                  | NO       | `libprotobuf-dev`   | `protobuf`   | `protobuf-devel`  | `protobuf-devel`    | YES      | Hardware wallet                                                |
+| protoc      | ?                                                                                  | NO       | `protobuf-compiler` | `protobuf`   | `protobuf`        | `protobuf-compiler` | YES      | Hardware wallet                                                |
+
+Rust and `cargo` are required on `master`. Install them with rustup (as CI
+does) on every platform, or from the distribution package where one is named
+below; this table describes `master` — `release-v0.18` keeps its earlier
+requirements.
+
+Monero is compiled as C++23. The configure step enforces the minimum
+toolchain versions and stops with an error below them: GCC 13, Clang 16,
+Apple Clang 15 (Xcode 15), MinGW-w64 GCC 13 (MSYS2 UCRT64) and CMake 3.20.
+CI and release acceptance build with GCC 14.2 as the primary compiler and
+Clang 19 as the secondary compiler. The verified standard-library pairings
+are GCC with libstdc++ 13 or 14, Clang 16 with libstdc++ 13, and
+Clang 18 or 19 with libstdc++ 14 (Boost 1.84 or newer for a warning-clean
+build). Clang 16 with libstdc++ 14 does not compile the tree, and Clang with
+libc++ is not a verified pairing. The pairing matrix and its evidence are in
+the ["Toolchain requirements"](docs/COMPILING_DEBUGGING_TESTING.md#toolchain-requirements)
+section of [docs/COMPILING_DEBUGGING_TESTING.md](docs/COMPILING_DEBUGGING_TESTING.md);
+Clang 19 with libstdc++ 14, verified by the C++23 acceptance builds, is not
+yet a row of that matrix.
 
 Install all dependencies at once on Debian/Ubuntu:
 
@@ -164,20 +185,25 @@ Install all dependencies at once on Debian/Ubuntu:
 sudo apt update && sudo apt install build-essential cmake pkg-config libssl-dev libzmq3-dev libunbound-dev libsodium-dev libunwind-dev libreadline-dev libhidapi-dev libusb-1.0-0-dev libprotobuf-dev protobuf-compiler libboost-chrono-dev libboost-date-time-dev libboost-filesystem-dev libboost-locale-dev libboost-program-options-dev libboost-regex-dev libboost-serialization-dev libboost-system-dev libboost-thread-dev python3 ccache doxygen graphviz git curl
 ```
 
+That command installs the system dependencies only: Rust and `cargo` are
+mandatory on `master` and are not among them, and the `rustc` and `cargo`
+packaged by Debian and Ubuntu are older than the toolchain CI tests with, so
+install the toolchain through rustup.
+
 Install all dependencies at once on Arch:
 ```
-sudo pacman -Syu --needed base-devel cmake boost boost-libs openssl zeromq unbound libsodium libunwind readline python ccache doxygen graphviz hidapi libusb protobuf
+sudo pacman -Syu --needed base-devel cmake boost boost-libs openssl zeromq unbound libsodium libunwind readline rust python ccache doxygen graphviz hidapi libusb protobuf
 ```
 
 Install all dependencies at once on Fedora:
 ```
-sudo dnf install gcc gcc-c++ cmake pkgconf boost-devel openssl-devel zeromq-devel unbound-devel libsodium-devel libunwind-devel readline-devel ccache doxygen graphviz hidapi-devel libusb1-devel protobuf-devel protobuf-compiler
+sudo dnf install gcc gcc-c++ cmake pkgconf boost-devel openssl-devel zeromq-devel unbound-devel libsodium-devel libunwind-devel readline-devel rust cargo ccache doxygen graphviz hidapi-devel libusb1-devel protobuf-devel protobuf-compiler
 ```
 
 Install all dependencies at once on openSUSE:
 
 ```
-sudo zypper ref && sudo zypper in cppzmq-devel libboost_chrono-devel libboost_date_time-devel libboost_filesystem-devel libboost_locale-devel libboost_program_options-devel libboost_regex-devel libboost_serialization-devel libboost_system-devel libboost_thread-devel libsodium-devel libunwind-devel unbound-devel cmake doxygen ccache fdupes gcc-c++ libevent-devel libopenssl-devel pkgconf-pkg-config readline-devel patterns-devel-C-C++-devel_C_C++
+sudo zypper ref && sudo zypper in cppzmq-devel libboost_chrono-devel libboost_date_time-devel libboost_filesystem-devel libboost_locale-devel libboost_program_options-devel libboost_regex-devel libboost_serialization-devel libboost_system-devel libboost_thread-devel libsodium-devel libunwind-devel unbound-devel cmake doxygen ccache fdupes gcc-c++ libevent-devel libopenssl-devel pkgconf-pkg-config readline-devel rust cargo patterns-devel-C-C++-devel_C_C++
 ```
 
 Install all dependencies at once on macOS with the provided Brewfile:
@@ -189,7 +215,7 @@ brew update && brew bundle --file=contrib/brew/Brewfile
 FreeBSD one-liner required to build dependencies:
 
 ```
-pkg install git gmake cmake pkgconf boost-libs libzmq4 libsodium unbound
+pkg install git gmake cmake pkgconf boost-libs libzmq4 libsodium unbound rust
 ```
 
 ### Cloning the repository
@@ -321,10 +347,10 @@ Binaries for Windows can be built on Windows using the MinGW toolchain within [M
 * Install dependencies:
 
     ```bash
-    pacman -S mingw-w64-x86_64-toolchain make mingw-w64-x86_64-cmake mingw-w64-x86_64-boost mingw-w64-x86_64-openssl mingw-w64-x86_64-zeromq mingw-w64-x86_64-libsodium mingw-w64-x86_64-hidapi mingw-w64-x86_64-unbound
+    pacman -S mingw-w64-ucrt-x86_64-toolchain make mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-boost mingw-w64-ucrt-x86_64-openssl mingw-w64-ucrt-x86_64-zeromq mingw-w64-ucrt-x86_64-libsodium mingw-w64-ucrt-x86_64-hidapi mingw-w64-ucrt-x86_64-unbound mingw-w64-ucrt-x86_64-rust
     ```
 
-* Open the MingW shell via `MSYS2 MINGW64` shortcut.
+* Open the MingW shell via `MSYS2 UCRT64` shortcut.
 
 **Cloning**
 
@@ -372,7 +398,7 @@ Monero is also available as a port or package as `monero-cli`.
 
 ### On OpenBSD:
 
-You will need to add a few packages to your system. `pkg_add cmake gmake zeromq libiconv boost libunbound`.
+You will need to add a few packages to your system. `pkg_add cmake gmake zeromq libiconv boost libunbound rust`.
 
 The `doxygen` and `graphviz` packages are optional and require the xbase set. Running the test suite also requires `py3-requests` package.
 
@@ -389,7 +415,7 @@ Then you need to increase the data ulimit size to 2GB and try again: `ulimit -d 
 
 ### On NetBSD:
 
-Check that the dependencies are present: `pkg_info -c libexecinfo boost-headers boost-libs protobuf readline libusb1 zeromq git-base pkgconf gmake cmake | more`, and install any that are reported missing, using `pkg_add` or from your pkgsrc tree. Readline is optional but worth having.
+Check that the dependencies are present: `pkg_info -c libexecinfo boost-headers boost-libs protobuf readline libusb1 zeromq git-base pkgconf gmake cmake rust | more`, and install any that are reported missing, using `pkg_add` or from your pkgsrc tree. Readline is optional but worth having.
 
 Third-party dependencies are usually under `/usr/pkg/`, but if you have a custom setup, adjust the "/usr/pkg" (below) accordingly.
 

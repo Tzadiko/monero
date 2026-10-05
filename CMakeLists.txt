@@ -28,7 +28,7 @@
 #
 # Parts of this file are originally copyright (c) 2012-2013 The Cryptonote developers
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 message(STATUS "CMake version ${CMAKE_VERSION}")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -53,7 +53,7 @@ if (POLICY CMP0179)
 endif()
 
 if (IOS)
-    INCLUDE(CmakeLists_IOS.txt)
+    INCLUDE("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists_IOS.txt")
 endif()
 
 project(monero)
@@ -99,7 +99,7 @@ if (USE_COMPILATION_TIME_PROFILER)
 	add_compile_options("-ftime-trace")
 endif()
 
-if (${CMAKE_VERSION} VERSION_GREATER "3.0.0" AND CMAKE_MAKE_PROGRAM MATCHES "ninja")
+if (CMAKE_MAKE_PROGRAM MATCHES "ninja")
   set(MONERO_PARALLEL_COMPILE_JOBS "" CACHE STRING "The maximum number of concurrent compilation jobs.")
   if (MONERO_PARALLEL_COMPILE_JOBS)
     set_property(GLOBAL APPEND PROPERTY JOB_POOLS compile_job_pool=${MONERO_PARALLEL_COMPILE_JOBS})
@@ -129,13 +129,46 @@ endif()
 
 enable_language(C ASM)
 
-# Require C11/C++11 and disable extensions for all targets
+# First-party targets use strict C11/C++23; external targets may override these defaults.
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Enforce the compiler-family floors accepted for this C++23 tree. README.md
+# mirrors the floors in prose, while docs/COMPILING_DEBUGGING_TESTING.md
+# ("Toolchain requirements") carries the authoritative compatibility matrix
+# and evidence status. Every rejection below points there instead of restating it.
+#
+# The guard checks compiler family, frontend variant and version; it does not
+# probe the standard library. A standard-library pairing defect (for example
+# Clang 16 against libstdc++ 14) is a header mismatch rather than a version
+# mismatch, fails immediately and self-explanatorily at compile time, and is
+# therefore documented rather than probed here.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # MinGW-w64 GCC also reports "GNU", so this branch carries the Windows floor.
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0)
+    message(FATAL_ERROR "GCC ${CMAKE_CXX_COMPILER_VERSION} is too old; GCC 13 or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+  endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  # The frontend variant is tested before the version floor so that a clang-cl
+  # of any version is rejected with the reason that actually applies to it.
+  if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} with the MSVC frontend variant (clang-cl) is unsupported: this repository has no clang-cl build path, as Windows is built with MinGW-w64 GCC through MSYS2 UCRT64. Use GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 or newer (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+  elseif(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16.0)
+    message(FATAL_ERROR "Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Clang 16 or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+  endif()
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
+  # Apple Clang 15 ships with Xcode 15 and is based on LLVM 16, which makes it
+  # the Apple equivalent of the Clang floor.
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 15.0)
+    message(FATAL_ERROR "Apple Clang ${CMAKE_CXX_COMPILER_VERSION} is too old; Apple Clang 15 (Xcode 15) or newer is required for C++23 (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+  endif()
+else()
+  message(FATAL_ERROR "Unsupported C++ compiler '${CMAKE_CXX_COMPILER_ID}' (version ${CMAKE_CXX_COMPILER_VERSION}); this repository is built as C++23 and requires GCC 13 or newer, Clang 16 or newer, or Apple Clang 15 (Xcode 15) or newer (see docs/COMPILING_DEBUGGING_TESTING.md, Toolchain requirements)")
+endif()
 
 function (add_c_flag_if_supported flag var)
   # Prepending the flag with -Werror will only add the flag,
@@ -210,7 +243,7 @@ function (monero_add_minimal_executable name)
     monero_set_target_strip    ("${name}")
 endfunction()
 
-# Finds all headers in a directory and its subdirs, to be able to search for them and autosave in IDEs.
+# Finds all headers in a directory and its immediate subdirectories (one level deep), to be able to search for them and autosave in IDEs.
 #
 # Parameters:
 # - headers_found:    Output variable, which will hold the found headers
@@ -218,7 +251,7 @@ endfunction()
 macro (monero_find_all_headers headers_found module_root_dir)
   file(GLOB ${headers_found}
            "${module_root_dir}/*.h*"    # h* will include hpps as well.
-           "${module_root_dir}/**/*.h*" # Any number of subdirs will be included.
+           "${module_root_dir}/**/*.h*" # One subdir level only: file(GLOB) does not recurse, "**" matches a single directory name.
            "${module_root_dir}/*.inl"   # .inl is typically template code and is being treated as headers (it's being included).
            "${module_root_dir}/**/*.inl"
 )
@@ -243,7 +276,7 @@ function(forbid_undefined_symbols)
     file(MAKE_DIRECTORY "${TEST_PROJECT}")
     file(WRITE "${TEST_PROJECT}/CMakeLists.txt"
       [=[
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 project(test)
 option(EXPECT_SUCCESS "" ON)
 file(WRITE "${CMAKE_SOURCE_DIR}/incorrect_source.cpp" "void undefined_symbol(); void symbol() { undefined_symbol(); }")
@@ -256,11 +289,16 @@ add_library(l2 STATIC incorrect_source.cpp)
 add_library(l3 OBJECT incorrect_source.cpp)
 ]=]
     )
+    # The whole-project try_compile signature does not inherit the parent's
+    # language standard, so it is forwarded to make the probe compile as the tree does.
     try_compile(SUCCESS "${TEST_PROJECT}/build" "${TEST_PROJECT}" test
       CMAKE_FLAGS
       "-DCMAKE_SHARED_LINKER_FLAGS=${CMAKE_SHARED_LINKER_FLAGS}"
       "-DCMAKE_MODULE_LINKER_FLAGS=${CMAKE_MODULE_LINKER_FLAGS}"
       "-DEXPECT_SUCCESS=${EXPECT}"
+      "-DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}"
+      "-DCMAKE_CXX_STANDARD_REQUIRED=${CMAKE_CXX_STANDARD_REQUIRED}"
+      "-DCMAKE_CXX_EXTENSIONS=${CMAKE_CXX_EXTENSIONS}"
     )
     if (NOT ${SUCCESS} STREQUAL ${EXPECT})
       message(FATAL_ERROR "Undefined symbols test failure: expect(${EXPECT}), success(${SUCCESS})")
@@ -384,22 +422,22 @@ endif()
 option(MANUAL_SUBMODULES "Skip submodule up-to-date checks" OFF)
 if(NOT MANUAL_SUBMODULES)
   find_package(Git)
-  if(GIT_FOUND)
+  if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     function (check_submodule relative_path)
-      execute_process(COMMAND git rev-parse "HEAD" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${relative_path} OUTPUT_VARIABLE localHead)
-      execute_process(COMMAND git rev-parse "HEAD:${relative_path}" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} OUTPUT_VARIABLE checkedHead)
-      string(COMPARE EQUAL "${localHead}" "${checkedHead}" upToDate)
-      if (upToDate)
+      execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --verify "HEAD" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${relative_path} RESULT_VARIABLE localStatus OUTPUT_VARIABLE localHead ERROR_VARIABLE localError OUTPUT_STRIP_TRAILING_WHITESPACE)
+      execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --verify "HEAD:${relative_path}" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} RESULT_VARIABLE checkedStatus OUTPUT_VARIABLE checkedHead ERROR_VARIABLE checkedError OUTPUT_STRIP_TRAILING_WHITESPACE)
+      if (localStatus EQUAL 0 AND checkedStatus EQUAL 0 AND "${localHead}" MATCHES "^[0-9a-f]+$" AND "${localHead}" STREQUAL "${checkedHead}")
         message(STATUS "Submodule '${relative_path}' is up-to-date")
       else()
-        message(FATAL_ERROR "Submodule '${relative_path}' is not up-to-date. Please update all submodules with\ngit submodule update --init --force\nor run cmake with -DMANUAL_SUBMODULES=1\n")
+        message(FATAL_ERROR "Submodule '${relative_path}' is not up-to-date or could not be verified (checked out '${localHead}', recorded '${checkedHead}'; git rev-parse exit status ${localStatus} and ${checkedStatus}).\n${localError}${checkedError}Please update all submodules with\ngit submodule update --init --force\nor run cmake with -DMANUAL_SUBMODULES=1\n")
       endif()
     endfunction ()
-    
     message(STATUS "Checking submodules")
     check_submodule(external/rapidjson)
     check_submodule(external/randomx)
     check_submodule(external/supercop)
+  elseif(GIT_FOUND)
+    message(STATUS "Submodule checks skipped: ${CMAKE_CURRENT_SOURCE_DIR} is not a Git checkout (for example a source archive)")
   endif()
 endif()
 
@@ -671,7 +709,6 @@ endif()
 # Trezor support check
 include(CheckTrezor)
 
-  include(TestCXXAcceptsFlag)
   message(STATUS "Building on ${CMAKE_SYSTEM_PROCESSOR} for ${ARCH}")
   if(ARCH STREQUAL "default")
     set(ARCH_FLAG "")
@@ -722,7 +759,7 @@ include(CheckTrezor)
   elseif(ARM7)
     message(STATUS "AES support not available on ARMv7")
   elseif(ARM8)
-    CHECK_CXX_ACCEPTS_FLAG("-march=${ARCH}+crypto" ARCH_PLUS_CRYPTO)
+    check_cxx_compiler_flag("-march=${ARCH}+crypto" ARCH_PLUS_CRYPTO)
     if(ARCH_PLUS_CRYPTO)
       message(STATUS "Crypto extensions enabled for ARMv8")
       set(ARCH_FLAG "-march=${ARCH}+crypto")
@@ -805,7 +842,7 @@ include(CheckTrezor)
     # Windows binaries die on startup with PIE when compiled with GCC <9.x
     # Windows dynamically-linked binaries die on startup with PIE regardless of GCC version
     if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      # Clang does not support -pie flag
+      # Clang: request PIE from the linker directly (-Wl,-pie); kept only if the linker-flag probe accepts it
       add_linker_flag_if_supported("-Wl,-pie" LD_SECURITY_FLAGS)
     else()
       add_linker_flag_if_supported("-pie" LD_SECURITY_FLAGS)
@@ -925,6 +962,13 @@ if(STATIC)
     endif()
   endif()
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${STATIC_FLAGS} ")
+endif()
+
+# The 3.20 minimum enables <PackageName>_ROOT lookups (CMP0074); also honour the
+# upper-case BOOST_ROOT that contrib/depends/toolchain.cmake sets, so that CMake
+# 3.27 and newer do not warn that CMP0144 is unset.
+if (POLICY CMP0144)
+  cmake_policy(SET CMP0144 NEW)
 endif()
 
 # Find Boost headers
